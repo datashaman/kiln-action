@@ -94,6 +94,8 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
 ```
 
+A standalone copy of this workflow is also available at [`templates/workflow.yml`](templates/workflow.yml).
+
 ### 3. Create labels
 
 Labels are created automatically on Kiln's first run. To create them in advance, see the [Labels](#labels) section.

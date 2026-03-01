@@ -372,3 +372,37 @@
   - `postStageError` uses regex `/timed?\s*out/i` to detect timeout-related messages and add timeout-specific UI (⏱️ + advice)
   - The `duration` output uses `Math.round((Date.now() - startTime) / 1000)` for seconds — simple and sufficient
 ---
+
+## 2026-03-01 - US-016
+- Enhanced README.md with comprehensive Getting Started guide meeting all 6 acceptance criteria
+- AC1 (project overview, pipeline diagram, install steps, config reference): Already had overview and diagram; restructured "Quick Start" into "Getting Started" with numbered steps and config reference section
+- AC2 (install steps cover API key, labels, workflow, CLAUDE.md): Added 4 numbered steps: (1) API key secret, (2) workflow file, (3) labels, (4) CLAUDE.md
+- AC3 (example workflow, copy-paste ready): Updated inline workflow to include all 5 required events: issues, issue_comment, pull_request, pull_request_review, check_suite — with comments explaining each trigger
+- AC4 (CLAUDE.md template): Added example CLAUDE.md with sections: Project description, Conventions (language, test runner, linting, commit style), Rules for Kiln Agents (6 default rules)
+- AC5 (safety controls): Expanded "Safety" into "Safety Controls" with subsections: Emergency Stop, Human Spec Approval Gate, Protected Paths, Branch Protections, Timeouts, Conventional Commits, Loop Prevention
+- AC6 (troubleshooting): Added 7 troubleshooting scenarios: Kiln not responding, labels not created, PRs not created, review not running, auto-merge not working, blocked message, agent timeout
+- Updated `templates/workflow.yml` to include all required events (issue_comment, check_suite were missing)
+- Files changed:
+  - README.md (restructured and expanded: Getting Started, CLAUDE.md template, Safety Controls, Troubleshooting)
+  - templates/workflow.yml (added issue_comment and check_suite triggers with explanatory comments)
+- **Learnings for future iterations:**
+  - The existing README had good bones but was missing: CLAUDE.md setup step, troubleshooting section, expanded safety docs
+  - The template workflow.yml was missing `issue_comment` (needed for re-triage) and `check_suite` (needed for auto-merge on CI pass)
+  - README changes are documentation-only — no build/dist rebuild needed
+---
+
+## 2026-03-01 - US-017
+- Verified existing `templates/workflow.yml` satisfies all 5 acceptance criteria
+- Added reference to `templates/workflow.yml` in README (AC1: documented path for standalone file)
+- All AC already met by existing code:
+  - AC1: Example file at `templates/workflow.yml` + inline in README (now with cross-reference)
+  - AC2: All 5 required events: issues, issue_comment, pull_request, pull_request_review, check_suite
+  - AC3: Correct permissions: issues: write, contents: write, pull-requests: write
+  - AC4: Single job running datashaman/kiln-action@v1 with anthropic_api_key input
+  - AC5: Comments explaining each trigger (Triage, Re-triage, Review, Approve-spec/Fix/Ship, Ship CI)
+- Files changed:
+  - README.md (added reference to templates/workflow.yml)
+- **Learnings for future iterations:**
+  - The `templates/workflow.yml` was already fully implemented by US-016; this story only needed a cross-reference in the README
+  - Documentation-only changes don't require dist/ rebuild
+---

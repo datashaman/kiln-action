@@ -263,8 +263,8 @@
         "Troubleshooting section covers common issues (missing labels, missing secret, permissions)"
       ],
       "priority": 16,
-      "passes": false,
-      "inProgress": true
+      "passes": true,
+      "inProgress": false
     },
     {
       "id": "US-017",
@@ -278,7 +278,8 @@
         "File includes comments explaining each trigger"
       ],
       "priority": 17,
-      "passes": false
+      "passes": true,
+      "inProgress": false
     },
     {
       "id": "US-018",
