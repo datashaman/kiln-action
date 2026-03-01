@@ -204,7 +204,8 @@
         "If conditions not met: no-op (waits for remaining condition)"
       ],
       "priority": 12,
-      "passes": false
+      "passes": true,
+      "inProgress": false
     },
     {
       "id": "US-013",

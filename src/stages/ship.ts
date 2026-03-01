@@ -4,11 +4,34 @@ import { KilnContext, StageResult } from "../types";
 
 export default async function ship(ctx: KilnContext): Promise<StageResult> {
   const { octokit, context, config } = ctx;
-  const pr = context.payload.pull_request;
   const prefix = config.labels?.prefix || "kiln";
+
+  // Resolve PR from payload — pull_request_review has it directly,
+  // check_suite.completed needs to look it up from associated PRs.
+  let pr = context.payload.pull_request;
+  if (!pr && context.eventName === "check_suite") {
+    const suitePrs =
+      (context.payload.check_suite?.pull_requests as Array<{ number: number }>) || [];
+    if (suitePrs.length > 0) {
+      const { data: fullPr } = await octokit.rest.pulls.get({
+        ...context.repo,
+        pull_number: suitePrs[0].number,
+      });
+      pr = fullPr as unknown as typeof pr;
+    }
+  }
 
   if (!pr) {
     core.info("🔥 Ship — No PR in payload, skipping.");
+    return { status: "skipped" };
+  }
+
+  // For check_suite events, verify the PR has the implementation label
+  const prLabels = ((pr.labels as Array<{ name: string }>) || []).map(
+    (l) => l.name,
+  );
+  if (!prLabels.some((l) => l.endsWith(":implementation"))) {
+    core.info("🔥 Ship — PR does not have implementation label, skipping.");
     return { status: "skipped" };
   }
 
@@ -33,10 +56,7 @@ export default async function ship(ctx: KilnContext): Promise<StageResult> {
   const ciPassing = checks.check_runs
     .filter((c) => c.name !== "kiln")
     .every(
-      (c) =>
-        c.conclusion === "success" ||
-        c.conclusion === "skipped" ||
-        c.status === "queued",
+      (c) => c.conclusion === "success" || c.conclusion === "skipped",
     );
 
   if (!ciPassing) {
@@ -73,7 +93,7 @@ export default async function ship(ctx: KilnContext): Promise<StageResult> {
     return { status: "error", reason: "merge-failed" };
   }
 
-  const issueMatch = (pr.body as string | undefined)?.match(/Closes #(\d+)/);
+  const issueMatch = (pr.body as string | undefined)?.match(/Closes #(\d+)/i);
   if (issueMatch) {
     const issueNumber = parseInt(issueMatch[1], 10);
 

@@ -1548,10 +1548,28 @@ const core = __importStar(__nccwpck_require__(7484));
 const labels_1 = __nccwpck_require__(4097);
 async function ship(ctx) {
     const { octokit, context, config } = ctx;
-    const pr = context.payload.pull_request;
     const prefix = config.labels?.prefix || "kiln";
+    // Resolve PR from payload — pull_request_review has it directly,
+    // check_suite.completed needs to look it up from associated PRs.
+    let pr = context.payload.pull_request;
+    if (!pr && context.eventName === "check_suite") {
+        const suitePrs = context.payload.check_suite?.pull_requests || [];
+        if (suitePrs.length > 0) {
+            const { data: fullPr } = await octokit.rest.pulls.get({
+                ...context.repo,
+                pull_number: suitePrs[0].number,
+            });
+            pr = fullPr;
+        }
+    }
     if (!pr) {
         core.info("🔥 Ship — No PR in payload, skipping.");
+        return { status: "skipped" };
+    }
+    // For check_suite events, verify the PR has the implementation label
+    const prLabels = (pr.labels || []).map((l) => l.name);
+    if (!prLabels.some((l) => l.endsWith(":implementation"))) {
+        core.info("🔥 Ship — PR does not have implementation label, skipping.");
         return { status: "skipped" };
     }
     core.info(`🔥 Ship — Checking if PR #${pr.number} is ready to merge`);
@@ -1570,9 +1588,7 @@ async function ship(ctx) {
     });
     const ciPassing = checks.check_runs
         .filter((c) => c.name !== "kiln")
-        .every((c) => c.conclusion === "success" ||
-        c.conclusion === "skipped" ||
-        c.status === "queued");
+        .every((c) => c.conclusion === "success" || c.conclusion === "skipped");
     if (!ciPassing) {
         core.info("🔥 Ship — CI not yet green. Will retry when checks complete.");
         return { status: "skipped", reason: "ci-pending" };
@@ -1600,7 +1616,7 @@ async function ship(ctx) {
         core.warning(`Merge failed: ${message}`);
         return { status: "error", reason: "merge-failed" };
     }
-    const issueMatch = pr.body?.match(/Closes #(\d+)/);
+    const issueMatch = pr.body?.match(/Closes #(\d+)/i);
     if (issueMatch) {
         const issueNumber = parseInt(issueMatch[1], 10);
         await (0, labels_1.transitionLabel)(octokit, context, issueNumber, "in-review", "done", prefix);
