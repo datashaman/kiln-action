@@ -1348,11 +1348,16 @@ var __importStar = (this && this.__importStar) || (function () {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports["default"] = review;
 const core = __importStar(__nccwpck_require__(7484));
+const fs = __importStar(__nccwpck_require__(9896));
+const child_process_1 = __nccwpck_require__(5317);
 const claude_1 = __nccwpck_require__(5144);
 async function review(ctx) {
     const { octokit, context, anthropicKey, timeoutMinutes } = ctx;
     const pr = context.payload.pull_request;
     core.info(`🔥 Review — PR #${pr.number}: ${pr.title}`);
+    // AC3: Check out the repo with full history (fetch-depth: 0)
+    (0, child_process_1.execSync)("git fetch --unshallow || git fetch", { encoding: "utf-8" });
+    (0, child_process_1.execSync)(`git checkout ${pr.head.ref}`, { encoding: "utf-8" });
     const { data: diff } = await octokit.rest.pulls.get({
         ...context.repo,
         pull_number: pr.number,
@@ -1366,12 +1371,19 @@ async function review(ctx) {
     const fileList = files
         .map((f) => `${f.status}: ${f.filename} (+${f.additions} -${f.deletions})`)
         .join("\n");
-    const issueMatch = pr.body?.match(/Closes #(\d+)/);
+    const issueMatch = pr.body?.match(/Closes #(\d+)/i);
     const specRef = issueMatch ? `specs/issue-${issueMatch[1]}.md` : null;
+    // AC4: Read the spec file content to include in the review prompt
+    let specContent = "";
+    if (specRef && fs.existsSync(specRef)) {
+        specContent = fs.readFileSync(specRef, "utf-8");
+    }
     const prompt = `You are the Kiln review agent — a senior code reviewer.
 
 **PR #${pr.number}:** ${pr.title}
 ${specRef ? `**Spec:** ${specRef}` : ""}
+
+${specContent ? `**Spec Content:**\n${specContent}\n` : ""}
 
 **Changed files:**
 ${fileList}
@@ -1379,7 +1391,7 @@ ${fileList}
 **Diff:**
 ${String(diff).substring(0, 50000)}
 
-${specRef ? `First, read the spec at ${specRef} and verify the implementation meets all acceptance criteria.` : ""}
+${specRef ? "Review the implementation against the spec's acceptance criteria above." : ""}
 
 Review for:
 1. **Correctness** — Does it do what the spec says?

@@ -1,4 +1,6 @@
 import * as core from "@actions/core";
+import * as fs from "fs";
+import { execSync } from "child_process";
 import { runClaude } from "../claude";
 import { KilnContext, StageResult } from "../types";
 
@@ -7,6 +9,10 @@ export default async function review(ctx: KilnContext): Promise<StageResult> {
   const pr = context.payload.pull_request!;
 
   core.info(`🔥 Review — PR #${pr.number}: ${pr.title}`);
+
+  // AC3: Check out the repo with full history (fetch-depth: 0)
+  execSync("git fetch --unshallow || git fetch", { encoding: "utf-8" });
+  execSync(`git checkout ${pr.head.ref}`, { encoding: "utf-8" });
 
   const { data: diff } = await octokit.rest.pulls.get({
     ...context.repo,
@@ -27,13 +33,21 @@ export default async function review(ctx: KilnContext): Promise<StageResult> {
     )
     .join("\n");
 
-  const issueMatch = (pr.body as string | undefined)?.match(/Closes #(\d+)/);
+  const issueMatch = (pr.body as string | undefined)?.match(/Closes #(\d+)/i);
   const specRef = issueMatch ? `specs/issue-${issueMatch[1]}.md` : null;
+
+  // AC4: Read the spec file content to include in the review prompt
+  let specContent = "";
+  if (specRef && fs.existsSync(specRef)) {
+    specContent = fs.readFileSync(specRef, "utf-8");
+  }
 
   const prompt = `You are the Kiln review agent — a senior code reviewer.
 
 **PR #${pr.number}:** ${pr.title}
 ${specRef ? `**Spec:** ${specRef}` : ""}
+
+${specContent ? `**Spec Content:**\n${specContent}\n` : ""}
 
 **Changed files:**
 ${fileList}
@@ -41,7 +55,7 @@ ${fileList}
 **Diff:**
 ${String(diff).substring(0, 50000)}
 
-${specRef ? `First, read the spec at ${specRef} and verify the implementation meets all acceptance criteria.` : ""}
+${specRef ? "Review the implementation against the spec's acceptance criteria above." : ""}
 
 Review for:
 1. **Correctness** — Does it do what the spec says?
