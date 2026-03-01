@@ -87,9 +87,7 @@ export async function invokeClaude(
       error instanceof Error && (error as NodeJS.ErrnoException).code === "ETIMEDOUT";
     const errorMessage = isTimeout
       ? `Claude Code timed out after ${timeoutMinutes} minutes`
-      : error instanceof Error
-        ? error.message
-        : String(error);
+      : formatExecError(error);
 
     core.error(`Claude Code invocation failed: ${errorMessage}`);
 
@@ -114,8 +112,7 @@ export async function runClaude(
   try {
     return execClaude(prompt, anthropicKey, timeoutMs, false);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    core.error(`Claude CLI failed: ${message}`);
+    core.error(`Claude CLI failed: ${formatExecError(error)}`);
     throw error;
   }
 }
@@ -134,10 +131,24 @@ export async function runClaudeEdit(
   try {
     return execClaude(prompt, anthropicKey, timeoutMs, true);
   } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    core.error(`Claude CLI (edit) failed: ${message}`);
+    core.error(`Claude CLI (edit) failed: ${formatExecError(error)}`);
     throw error;
   }
+}
+
+/**
+ * Extract a useful error message from an execSync failure.
+ * The thrown error includes `stderr` with the actual CLI output.
+ */
+function formatExecError(error: unknown): string {
+  if (!(error instanceof Error)) return String(error);
+  const execError = error as Error & { stderr?: Buffer | string };
+  const stderr = execError.stderr
+    ? typeof execError.stderr === "string"
+      ? execError.stderr.trim()
+      : execError.stderr.toString().trim()
+    : "";
+  return stderr || error.message;
 }
 
 /**

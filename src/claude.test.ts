@@ -147,6 +147,19 @@ describe("invokeClaude", () => {
       expect(result.output).toBe("");
     });
 
+    it("extracts stderr from execSync errors", async () => {
+      const error = new Error("Command failed: claude --print --dangerously-skip-permissions");
+      (error as Error & { stderr: string }).stderr = "Error: Invalid API key\n";
+      mockedExecSync.mockImplementation(() => { throw error; });
+
+      const result = await invokeClaude("prompt", {
+        anthropicKey: "sk-ant-test",
+      });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("Error: Invalid API key");
+    });
+
     it("posts error comment on issue when octokit and context provided", async () => {
       mockedExecSync.mockImplementation(() => {
         throw new Error("API rate limited");
