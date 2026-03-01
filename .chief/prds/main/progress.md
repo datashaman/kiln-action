@@ -21,6 +21,10 @@
 - Label prefix `{prefix}:needs-info` for needs-info label (not bare `needs-info`)
 - Labels.ts `LABEL_DEFS` includes `intake` and `needs-info` pipeline state labels
 - Stage test pattern: mock `@actions/core`, `../claude`, `../labels`; use `makeOctokit`/`makeConfig`/`makeContext`/`makeCtx` helpers
+- For stages using `fs` and `child_process`: mock `child_process` with factory, mock `fs` with `jest.requireActual` partial mock to preserve `fs.promises` (needed by `@actions/core`)
+- Specify stage: `runClaudeEdit` (edit mode) for AI spec generation; `transitionLabel` for specifying→spec-review transition
+- Specify stage uses `execSync` for git operations (config, checkout, commit, push) and `fs` for mkdir/existsSync/readFileSync
+- Approve-spec stage: extracts issue number from branch name `kiln/spec/issue-{number}` (fallback to PR body `Tracking issue: #N`), squash merges, transitions spec-review→implementing
 
 ## 2026-03-01 - US-001
 - Converted project from JavaScript to TypeScript
@@ -158,4 +162,38 @@
   - Re-triage needs separate handler from triage because it has fundamentally different behavior: fetches comments, checks sender, different label transitions (needs-info→specifying vs null→specifying)
   - For comment-based events, the comment payload is at `context.payload.comment`, not `context.payload.issue`
   - `listComments` returns `{ data: [...] }` — mock with `jest.fn().mockResolvedValue({ data: [...] })`
+---
+
+## 2026-03-01 - US-007
+- Verified existing `src/stages/specify.ts` implementation covers all 9 acceptance criteria
+- Wrote 34 comprehensive tests in `src/stages/specify.test.ts` covering all AC
+- Tests cover: trigger, checkout/branching, Claude invocation, spec file creation, custom templates, git commit/push, PR creation, PR labels, issue label transition, issue comment, edge cases
+- Files changed:
+  - src/stages/specify.test.ts (new — 34 tests)
+  - .chief/prds/main/prd.json (marked US-007 as passing)
+- **Learnings for future iterations:**
+  - Cannot use `jest.spyOn(fs, "existsSync")` — Node.js fs module properties are not configurable, `spyOn` will throw "Cannot redefine property"
+  - Instead, use `jest.mock("fs", () => { const actual = jest.requireActual("fs"); return { ...actual, existsSync: jest.fn(), ... }; })` to partially mock fs while preserving `fs.promises` which `@actions/core` depends on
+  - For `child_process`, use `jest.mock("child_process", () => ({ execSync: jest.fn() }))` — simpler since nothing in the test deps uses child_process
+  - `jest.mock` factories are hoisted before variable declarations, so `jest.requireActual()` must be called inside the factory function, not stored in a variable before
+  - The specify handler was already fully implemented — only needed test coverage
+  - Mock `octokit.rest.pulls.create` in addition to issues methods when testing stages that create PRs
+---
+
+## 2026-03-01 - US-008
+- Updated `src/stages/approve-spec.ts` to extract issue number from branch name (`kiln/spec/issue-{number}`) per AC, with fallback to PR body (`Tracking issue: #N`)
+- Handler was already mostly implemented: squash merges spec PR, transitions spec-review→implementing, posts branded comment
+- Wrote 20 comprehensive tests in `src/stages/approve-spec.test.ts` covering all 7 AC
+- Tests cover: trigger, squash merge (success/failure), branch name extraction (primary + fallback + edge cases), label transition, branded comment, custom prefix, result
+- Files changed:
+  - src/stages/approve-spec.ts (updated issue number extraction: branch name primary, PR body fallback)
+  - src/stages/approve-spec.test.ts (new — 20 tests)
+  - .chief/prds/main/prd.json (marked US-008 as passing)
+  - dist/index.js (rebuilt)
+- **Learnings for future iterations:**
+  - Approve-spec stage doesn't invoke Claude — it's a pure GitHub API stage (merge PR, update labels, post comment)
+  - For PR events, `context.payload.pull_request.head.ref` provides the branch name
+  - `octokit.rest.pulls.merge` needs to be mocked separately from `issues` methods
+  - Branch name regex `^kiln\/spec\/issue-(\d+)$` is strict — only matches the exact pattern from the specify stage
+  - When testing stages that don't use Claude or fs/child_process, tests are simpler — only mock `@actions/core` and `../labels`
 ---

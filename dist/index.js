@@ -888,9 +888,16 @@ async function approveSpec(ctx) {
         core.setFailed(`Failed to merge spec PR: ${message}`);
         return { status: "error" };
     }
-    const issueMatch = pr.body?.match(/Tracking issue: #(\d+)/);
+    // Extract issue number from branch name (kiln/spec/issue-{number})
+    const branchName = pr.head?.ref;
+    const branchMatch = branchName?.match(/^kiln\/spec\/issue-(\d+)$/);
+    // Fallback to PR body if branch name doesn't match
+    const bodyMatch = !branchMatch
+        ? pr.body?.match(/Tracking issue: #(\d+)/)
+        : null;
+    const issueMatch = branchMatch || bodyMatch;
     if (!issueMatch) {
-        core.warning("Could not find linked issue number in spec PR body.");
+        core.warning("Could not find linked issue number in branch name or PR body.");
         return { status: "success" };
     }
     const issueNumber = parseInt(issueMatch[1], 10);

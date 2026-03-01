@@ -25,11 +25,18 @@ export default async function approveSpec(
     return { status: "error" };
   }
 
-  const issueMatch = (pr.body as string | undefined)?.match(
-    /Tracking issue: #(\d+)/,
-  );
+  // Extract issue number from branch name (kiln/spec/issue-{number})
+  const branchName = pr.head?.ref as string | undefined;
+  const branchMatch = branchName?.match(/^kiln\/spec\/issue-(\d+)$/);
+
+  // Fallback to PR body if branch name doesn't match
+  const bodyMatch = !branchMatch
+    ? (pr.body as string | undefined)?.match(/Tracking issue: #(\d+)/)
+    : null;
+
+  const issueMatch = branchMatch || bodyMatch;
   if (!issueMatch) {
-    core.warning("Could not find linked issue number in spec PR body.");
+    core.warning("Could not find linked issue number in branch name or PR body.");
     return { status: "success" };
   }
 
