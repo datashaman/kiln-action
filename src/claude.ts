@@ -58,15 +58,26 @@ async function extractResult(
         env: { ...process.env, ANTHROPIC_API_KEY: anthropicKey },
         stderr: (data: string) => {
           stderrChunks.push(data);
-          core.debug(`Claude SDK stderr: ${data}`);
+          core.warning(`Claude SDK stderr: ${data.trimEnd()}`);
         },
       },
     });
 
-    for await (const message of stream) {
-      if (message.type === "result") {
-        resultMessage = message as SDKResultMessage;
+    try {
+      for await (const message of stream) {
+        if (message.type === "result") {
+          resultMessage = message as SDKResultMessage;
+        }
       }
+    } catch (streamError) {
+      // Re-throw AbortError as-is for timeout detection
+      if (streamError instanceof Error && streamError.name === "AbortError") {
+        throw streamError;
+      }
+      // Enrich other SDK process errors with captured stderr
+      const stderr = stderrChunks.join("");
+      const baseMsg = streamError instanceof Error ? streamError.message : String(streamError);
+      throw new Error(`${baseMsg}${stderr ? `\nstderr: ${stderr}` : ""}`);
     }
 
     if (!resultMessage) {

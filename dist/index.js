@@ -135,14 +135,26 @@ async function extractResult(prompt, anthropicKey, timeoutMs, allowEdits) {
                 env: { ...process.env, ANTHROPIC_API_KEY: anthropicKey },
                 stderr: (data) => {
                     stderrChunks.push(data);
-                    core.debug(`Claude SDK stderr: ${data}`);
+                    core.warning(`Claude SDK stderr: ${data.trimEnd()}`);
                 },
             },
         });
-        for await (const message of stream) {
-            if (message.type === "result") {
-                resultMessage = message;
+        try {
+            for await (const message of stream) {
+                if (message.type === "result") {
+                    resultMessage = message;
+                }
             }
+        }
+        catch (streamError) {
+            // Re-throw AbortError as-is for timeout detection
+            if (streamError instanceof Error && streamError.name === "AbortError") {
+                throw streamError;
+            }
+            // Enrich other SDK process errors with captured stderr
+            const stderr = stderrChunks.join("");
+            const baseMsg = streamError instanceof Error ? streamError.message : String(streamError);
+            throw new Error(`${baseMsg}${stderr ? `\nstderr: ${stderr}` : ""}`);
         }
         if (!resultMessage) {
             const stderr = stderrChunks.join("");
