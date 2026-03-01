@@ -90,7 +90,8 @@
         "If still unclear: posts follow-up clarification request, keeps kiln:needs-info"
       ],
       "priority": 6,
-      "passes": false
+      "passes": true,
+      "inProgress": false
     },
     {
       "id": "US-007",

@@ -8,7 +8,8 @@
 - All stage handlers are in `src/stages/` as default exports
 - Shared types in `src/types.ts` (KilnContext, StageResult, RouteResult, KilnConfig, Octokit)
 - Router returns `RouteResult` with stage name, issueNumber, prNumber, labels, and payload
-- Stage name mapping in index.ts: `re-triage` → triage handler, `release` → ship handler
+- Stage name mapping in index.ts: `re-triage` → retriage handler, `release` → ship handler
+- Re-triage handler in `src/stages/retriage.ts`: separate from triage, fetches all comments, checks bot/action sender, uses `transitionLabel` for needs-info→specifying transition
 - `action.yml` uses `node24` runtime
 - Only `anthropic_api_key` is a required input; others have defaults
 - Blocked guard in `src/blocked.ts` runs before stage detection; checks `{prefix}:blocked` label on issues and PRs
@@ -135,4 +136,26 @@
   - Default fallback on parse failure: `clear_enough: true`, moves to specification (safe default to not block pipeline)
   - Labels from Claude response (`result.labels`) are spread into the labels array with `|| []` fallback for missing field
   - `transitionLabel` is only called on the clear path (specifying); on unclear path, `addLabels` is used directly for `needs-info`
+---
+
+## 2026-03-01 - US-006
+- Created dedicated `src/stages/retriage.ts` handler (separate from triage)
+- Updated `src/index.ts` STAGES map: `re-triage` now routes to `retriage` handler instead of `triage`
+- Re-triage fetches all comments via `octokit.rest.issues.listComments` and includes them in Claude prompt
+- Bot/action comment detection: checks `comment.user.type === "Bot"` and `comment.user.login === "github-actions[bot]"`
+- If clear: uses `transitionLabel` to remove `needs-info` and apply `specifying`
+- If still unclear: no label changes (keeps `needs-info`), posts follow-up clarification comment
+- Posts Kiln-branded re-triage comment: "🔥 **Kiln Re-triage**"
+- Reuses `TriageResult` interface from `./triage` for parsed JSON response
+- Added 27 comprehensive tests covering all AC: bot filtering, full context sending, clear/unclear paths, label transitions, branded comments, JSON parsing
+- Files changed:
+  - src/stages/retriage.ts (new - dedicated re-triage handler)
+  - src/stages/retriage.test.ts (new - 27 tests)
+  - src/index.ts (updated STAGES map: `re-triage` → retriage)
+  - dist/index.js (rebuilt)
+- **Learnings for future iterations:**
+  - Bot detection uses `comment.user.type` (GitHub API returns "Bot" for app/bot accounts) and specific login checks for github-actions[bot]
+  - Re-triage needs separate handler from triage because it has fundamentally different behavior: fetches comments, checks sender, different label transitions (needs-info→specifying vs null→specifying)
+  - For comment-based events, the comment payload is at `context.payload.comment`, not `context.payload.issue`
+  - `listComments` returns `{ data: [...] }` — mock with `jest.fn().mockResolvedValue({ data: [...] })`
 ---

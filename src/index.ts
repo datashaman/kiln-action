@@ -7,6 +7,7 @@ import { detectStage } from "./router";
 import { KilnContext, StageResult } from "./types";
 
 import triage from "./stages/triage";
+import retriage from "./stages/retriage";
 import specify from "./stages/specify";
 import approveSpec from "./stages/approve-spec";
 import implement from "./stages/implement";
@@ -18,7 +19,7 @@ type StageHandler = (ctx: KilnContext) => Promise<StageResult>;
 
 const STAGES: Record<string, StageHandler> = {
   triage,
-  "re-triage": triage,
+  "re-triage": retriage,
   specify,
   "approve-spec": approveSpec,
   implement,
