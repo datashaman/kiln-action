@@ -1,0 +1,284 @@
+{
+  "project": "Kiln Action",
+  "description": "Kiln is a single reusable GitHub Action (datashaman/kiln-action@v1) that provides an AI-powered development pipeline. Users file an issue, and Kiln automatically triages it, writes a spec, implements it, reviews it, and ships it — all orchestrated through one action that routes internally based on GitHub event type and label state.",
+  "userStories": [
+    {
+      "id": "US-001",
+      "title": "Action Entry Point \u0026 Project Scaffolding",
+      "description": "As a developer building Kiln, I want the foundational action structure (action.yml, TypeScript build pipeline, dist/ output) so that the action can be installed and invoked in any GitHub repo.",
+      "acceptanceCriteria": [
+        "action.yml exists with runs.using: node24 and runs.main: dist/index.js",
+        "Single required input: anthropic_api_key",
+        "TypeScript source compiles to dist/ via ncc or equivalent bundler",
+        "package.json with build, test, and lint scripts",
+        "Action can be referenced as uses: datashaman/kiln-action@v1 in a workflow",
+        "Entry point (src/index.ts) reads the GitHub event payload and invokes the router"
+      ],
+      "priority": 1,
+      "passes": false
+    },
+    {
+      "id": "US-002",
+      "title": "Event Router",
+      "description": "As Kiln, I want to inspect the incoming GitHub event type, action, and label state to determine which pipeline stage to execute, so that one action handles all stages.",
+      "acceptanceCriteria": [
+        "Router maps events to stages per these rules: issues.opened → triage; issue_comment.created (if issue has kiln:intake or kiln:needs-info) → re-triage; issues.labeled with kiln:specifying → specify; pull_request_review.submitted approved on PR with kiln:spec label → approve-spec; issues.labeled with kiln:implementing → implement; pull_request.opened or pull_request.synchronize on PR with kiln:implementation label → review; pull_request_review.submitted with changes_requested on PR with kiln:implementation label → fix; pull_request_review.submitted approved or check_suite.completed on PR with kiln:implementation label → release",
+        "Unmatched events result in a clean no-op exit (exit code 0, no error)",
+        "Router logs which stage it selected (or \"no matching stage\") for debugging",
+        "Router passes parsed context (issue number, PR number, labels, event payload) to the selected stage handler"
+      ],
+      "priority": 2,
+      "passes": false
+    },
+    {
+      "id": "US-003",
+      "title": "Blocked Guard",
+      "description": "As a repo maintainer, I want to add kiln:blocked to any issue or PR to immediately halt all Kiln automation on that item, so that I have an emergency stop.",
+      "acceptanceCriteria": [
+        "Before executing any stage, the router checks if the relevant issue or PR has the kiln:blocked label",
+        "If blocked, Kiln posts a comment: \"🔥 **Kiln** — Automation is blocked on this item. Remove kiln:blocked to resume.\"",
+        "If blocked, Kiln exits cleanly (exit code 0) without running the stage",
+        "The blocked check covers all stages: triage, re-triage, specify, approve-spec, implement, review, fix, release",
+        "For PR events, Kiln checks both the PR labels and the linked issue labels for kiln:blocked"
+      ],
+      "priority": 3,
+      "passes": false
+    },
+    {
+      "id": "US-004",
+      "title": "Claude Code Action Integration Layer",
+      "description": "As Kiln, I want a shared utility to invoke anthropics/claude-code-action@v1 with a prompt and receive structured output, so that all AI stages use a consistent integration pattern.",
+      "acceptanceCriteria": [
+        "Utility function accepts: prompt (string), anthropic API key, and optional configuration",
+        "Utility shells out to / invokes anthropics/claude-code-action@v1 passing the prompt via direct_prompt",
+        "Utility captures and returns the action's output",
+        "Utility handles timeouts (hard-coded 30 minutes default in v1)",
+        "Utility handles errors and surfaces them as issue/PR comments when possible",
+        "API key is passed securely (never logged or exposed in comments)"
+      ],
+      "priority": 4,
+      "passes": false
+    },
+    {
+      "id": "US-005",
+      "title": "Stage 1 — Triage (Issue Opened)",
+      "description": "As a repo maintainer, I want new issues to be automatically classified by type, complexity, and clarity so that the pipeline can proceed or request more information.",
+      "acceptanceCriteria": [
+        "Triggers on issues.opened",
+        "Sends issue title and body to Claude with a triage prompt",
+        "Claude responds with structured JSON: { type, complexity, clear_enough, comment, labels }",
+        "Kiln parses the JSON response and applies labels: type:{type}, size:{complexity}",
+        "If clear_enough is true: applies kiln:specifying label, posts confirmation comment",
+        "If clear_enough is false: applies kiln:needs-info label, posts clarification comment from Claude",
+        "Posts a Kiln-branded comment indicating triage result"
+      ],
+      "priority": 5,
+      "passes": false
+    },
+    {
+      "id": "US-006",
+      "title": "Stage 1b — Re-triage (Issue Comment After Clarification)",
+      "description": "As an issue author, I want Kiln to re-evaluate my issue after I provide clarification so that the pipeline can proceed.",
+      "acceptanceCriteria": [
+        "Triggers on issue_comment.created",
+        "Only runs if the issue has kiln:intake or kiln:needs-info label",
+        "Ignores comments from bots/actions (prevents infinite loops)",
+        "Sends full issue body + all comments to Claude for re-triage",
+        "If now clear enough: removes kiln:needs-info, applies kiln:specifying, posts confirmation",
+        "If still unclear: posts follow-up clarification request, keeps kiln:needs-info"
+      ],
+      "priority": 6,
+      "passes": false
+    },
+    {
+      "id": "US-007",
+      "title": "Stage 2 — Specification Agent",
+      "description": "As Kiln, I want to generate a detailed implementation spec from a triaged issue so that the implementation agent has clear instructions.",
+      "acceptanceCriteria": [
+        "Triggers when issue receives kiln:specifying label",
+        "Checks out the repo and sends issue context + codebase access to Claude",
+        "Claude creates a spec file at specs/issue-{number}.md with sections: Overview, Requirements, Technical Design, Test Plan, Out of Scope, Implementation Notes",
+        "Claude commits the spec to branch kiln/spec/issue-{number} and pushes",
+        "Kiln opens a PR titled \"📋 Kiln Spec: {issue title}\" targeting main",
+        "PR body references the issue number and includes review instructions",
+        "PR is labeled with kiln:spec and needs-human-review",
+        "Issue is updated: kiln:specifying removed, kiln:spec-review added",
+        "Comment posted on issue linking to the spec PR"
+      ],
+      "priority": 7,
+      "passes": false
+    },
+    {
+      "id": "US-008",
+      "title": "Stage 3 — Human Spec Approval Gate",
+      "description": "As a repo maintainer, I want spec PRs to require my explicit approval before implementation begins, so that I control what gets built.",
+      "acceptanceCriteria": [
+        "Triggers on pull_request_review.submitted where state is approved",
+        "Only runs on PRs with the kiln:spec label",
+        "Merges the spec PR via squash merge",
+        "Extracts the issue number from the branch name (kiln/spec/issue-{number})",
+        "Applies kiln:implementing label to the linked issue",
+        "Removes kiln:spec-review label from the issue",
+        "Posts comment on the issue: implementation agent is starting"
+      ],
+      "priority": 8,
+      "passes": false
+    },
+    {
+      "id": "US-009",
+      "title": "Stage 4 — Implementation Agent",
+      "description": "As Kiln, I want to generate a full implementation (code + tests) from an approved spec so that the feature is built automatically.",
+      "acceptanceCriteria": [
+        "Triggers when issue receives kiln:implementing label",
+        "Checks out the repo and reads the spec at specs/issue-{number}.md",
+        "Sends spec + codebase context to Claude with implementation prompt",
+        "Claude implements on branch kiln/impl/issue-{number}, following project conventions from CLAUDE.md",
+        "Claude writes all tests specified in the Test Plan",
+        "Claude runs tests and lint, fixing failures before committing",
+        "Uses conventional commits (feat:, fix:, chore:, etc.)",
+        "Kiln opens a PR titled \"🔨 Kiln Impl: {issue title}\" targeting main",
+        "PR body references spec file and includes Closes #{issue_number}",
+        "PR is labeled with kiln:implementation and needs-review",
+        "Issue is updated: kiln:implementing removed, kiln:in-review added",
+        "Comment posted on issue linking to the implementation PR"
+      ],
+      "priority": 9,
+      "passes": false
+    },
+    {
+      "id": "US-010",
+      "title": "Stage 5 — AI Code Review",
+      "description": "As Kiln, I want implementation PRs to be automatically reviewed by an AI reviewer so that code quality is validated before merge.",
+      "acceptanceCriteria": [
+        "Triggers on pull_request.opened and pull_request.synchronize",
+        "Only runs on PRs with the kiln:implementation label",
+        "Checks out the repo with full history (fetch-depth: 0)",
+        "Claude reads the referenced spec and reviews the diff against acceptance criteria",
+        "Review covers: correctness, security, performance, error handling, test coverage, style consistency",
+        "If everything passes: Claude approves the PR",
+        "If issues found: Claude requests changes with specific inline comments and fix instructions",
+        "Review is posted as a proper GitHub PR review (not just comments)"
+      ],
+      "priority": 10,
+      "passes": false
+    },
+    {
+      "id": "US-011",
+      "title": "Stage 6 — Fix Review Feedback",
+      "description": "As Kiln, I want the implementation agent to automatically address review feedback so that the PR can be re-reviewed and approved.",
+      "acceptanceCriteria": [
+        "Triggers on pull_request_review.submitted where state is changes_requested",
+        "Only runs on PRs with the kiln:implementation label",
+        "Checks out the PR's head branch",
+        "Claude reads all review comments and inline feedback",
+        "Claude addresses each comment: fixes code, adds tests, resolves concerns",
+        "Claude commits fixes and pushes to the PR branch",
+        "Claude replies to each review comment explaining the changes made",
+        "The push triggers a new synchronize event, which triggers re-review (Stage 5)"
+      ],
+      "priority": 11,
+      "passes": false
+    },
+    {
+      "id": "US-012",
+      "title": "Stage 7 — Auto-merge \u0026 Release",
+      "description": "As Kiln, I want approved implementation PRs with green CI to be automatically merged and released so that the pipeline completes without manual intervention.",
+      "acceptanceCriteria": [
+        "Triggers on pull_request_review.submitted (approved) and check_suite.completed",
+        "Only runs on PRs with the kiln:implementation label",
+        "Checks that the PR has at least one approval",
+        "Checks that all CI checks are passing (success or skipped)",
+        "If both conditions met: merges the PR via squash merge",
+        "Extracts issue number from PR body (Closes #N)",
+        "Applies kiln:done label to the issue",
+        "Closes the issue",
+        "Posts a final Kiln comment on the issue confirming release",
+        "If conditions not met: no-op (waits for remaining condition)"
+      ],
+      "priority": 12,
+      "passes": false
+    },
+    {
+      "id": "US-013",
+      "title": "Label Definitions \u0026 Setup Documentation",
+      "description": "As a user installing Kiln, I want clear documentation of the required labels and their hex colors so that I can set up my repo correctly.",
+      "acceptanceCriteria": [
+        "README documents all required labels with names, descriptions, and hex colors: Pipeline state (kiln:intake, kiln:needs-info, kiln:specifying, kiln:spec-review, kiln:implementing, kiln:in-review, kiln:done, kiln:blocked), PR markers (kiln:spec, kiln:implementation, needs-human-review, needs-review), Type (type:feature, type:bug, type:improvement, type:chore), Size (size:xs, size:s, size:m, size:l, size:xl)",
+        "A setup script or GitHub Actions workflow is provided (or documented steps) to create all labels"
+      ],
+      "priority": 13,
+      "passes": false
+    },
+    {
+      "id": "US-014",
+      "title": "Loop Prevention \u0026 Edge Case Handling",
+      "description": "As Kiln, I want safeguards against infinite loops and race conditions so that the pipeline doesn't run away or corrupt state.",
+      "acceptanceCriteria": [
+        "Bot/action comments are ignored in re-triage (prevents triage → comment → re-triage loop)",
+        "Label events triggered by Kiln itself don't cause duplicate stage runs (debounce or actor check)",
+        "If a stage fails, Kiln posts an error comment on the issue/PR and does not advance the pipeline",
+        "If a spec PR already exists for an issue, the specify stage does not create a duplicate",
+        "If an implementation PR already exists for an issue, the implement stage does not create a duplicate",
+        "Concurrent events for the same issue are handled gracefully (last-write-wins or queue)"
+      ],
+      "priority": 14,
+      "passes": false
+    },
+    {
+      "id": "US-015",
+      "title": "Error Handling \u0026 Observability",
+      "description": "As a repo maintainer, I want clear error reporting and logging so that I can diagnose pipeline failures.",
+      "acceptanceCriteria": [
+        "All stages wrap execution in try/catch and post error details as issue/PR comments",
+        "Error comments are clearly branded (e.g. \"🔥 **Kiln** — Error in {stage}: {message}\")",
+        "GitHub Actions step outputs include the stage name, duration, and result",
+        "Failed stages do not advance the pipeline (no label changes on error)",
+        "Timeout errors produce a specific message indicating the stage timed out"
+      ],
+      "priority": 15,
+      "passes": false
+    },
+    {
+      "id": "US-016",
+      "title": "README \u0026 Getting Started Guide",
+      "description": "As a developer who wants to use Kiln, I want a clear README with install instructions and a usage guide so that I can set up the pipeline in my repo.",
+      "acceptanceCriteria": [
+        "README includes: project overview, pipeline diagram, install steps, configuration reference",
+        "Install steps cover: adding ANTHROPIC_API_KEY secret, creating labels, adding workflow file, adding CLAUDE.md",
+        "Example workflow file is provided (copy-paste ready)",
+        "Example CLAUDE.md template is provided with placeholder sections",
+        "Safety controls documented: kiln:blocked label, branch protections, timeouts",
+        "Troubleshooting section covers common issues (missing labels, missing secret, permissions)"
+      ],
+      "priority": 16,
+      "passes": false
+    },
+    {
+      "id": "US-017",
+      "title": "Example Workflow File",
+      "description": "As a user installing Kiln, I want a ready-to-use workflow file so that I can copy it into my repo and start using Kiln immediately.",
+      "acceptanceCriteria": [
+        "Example file provided at a documented path (e.g. in README or examples/)",
+        "Workflow listens on all required events: issues, issue_comment, pull_request, pull_request_review, check_suite",
+        "Workflow has correct permissions: issues: write, contents: write, pull-requests: write",
+        "Single job that runs datashaman/kiln-action@v1 with anthropic_api_key input",
+        "File includes comments explaining each trigger"
+      ],
+      "priority": 17,
+      "passes": false
+    },
+    {
+      "id": "US-018",
+      "title": "CLAUDE.md Template for Kiln Users",
+      "description": "As a user installing Kiln, I want a CLAUDE.md template that constrains all Kiln agents to safe behavior so that automation stays scoped and predictable.",
+      "acceptanceCriteria": [
+        "Template includes sections: Project description, Conventions (language, test runner, linting, commit style), Rules for Kiln Agents",
+        "Default rules include: never modify workflows, never modify CLAUDE.md, always read spec before implementing, always run tests, keep changes scoped, comment on issue if blocked",
+        "Template is clearly marked as a starting point that users should customize",
+        "Provided in README and optionally as a standalone file (e.g. examples/CLAUDE.md)"
+      ],
+      "priority": 18,
+      "passes": false
+    }
+  ]
+}

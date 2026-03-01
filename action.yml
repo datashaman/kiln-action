@@ -1,0 +1,40 @@
+name: '🔥 Kiln'
+description: 'AI-powered dev pipeline. Issue in, release out.'
+author: 'datashaman'
+
+branding:
+  icon: 'zap'
+  color: 'orange'
+
+inputs:
+  anthropic_api_key:
+    description: 'Anthropic API key for Claude Code'
+    required: true
+  config_path:
+    description: 'Path to Kiln config file'
+    required: false
+    default: '.kiln/config.yml'
+  github_token:
+    description: 'GitHub token (defaults to GITHUB_TOKEN)'
+    required: false
+    default: ${{ github.token }}
+  stage:
+    description: 'Force a specific stage (auto-detects by default)'
+    required: false
+    default: 'auto'
+  timeout_minutes:
+    description: 'Timeout for AI agent operations'
+    required: false
+    default: '30'
+
+outputs:
+  stage:
+    description: 'Which stage was executed'
+  result:
+    description: 'Stage result (success, skipped, blocked, error)'
+  pr_number:
+    description: 'PR number created (if applicable)'
+
+runs:
+  using: 'node24'
+  main: 'dist/index.js'

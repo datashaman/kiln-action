@@ -1,0 +1,52 @@
+# ──────────────────────────────────────────────────────
+# 🔥 Kiln — AI-Powered Dev Pipeline
+#
+# Copy this file into any repo at .github/workflows/kiln.yml
+# and add ANTHROPIC_API_KEY to your repo secrets.
+# ──────────────────────────────────────────────────────
+
+name: "🔥 Kiln"
+
+on:
+  issues:
+    types: [opened, labeled]
+  pull_request:
+    types: [opened, synchronize]
+  pull_request_review:
+    types: [submitted]
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: write
+  checks: read
+
+jobs:
+  kiln:
+    runs-on: ubuntu-latest
+    # Don't run on issues/PRs created by Kiln itself
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - uses: your-org/kiln-action@v1
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
+
+  # ── Your normal CI (runs alongside Kiln) ──────────
+  ci:
+    runs-on: ubuntu-latest
+    if: github.event_name == 'pull_request'
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+      - name: Test
+        run: npm test
+      - name: Build
+        run: npm run build

@@ -1,0 +1,53 @@
+# ──────────────────────────────────────────────────────
+# 🔥 Kiln Configuration
+#
+# Place this file at .kiln/config.yml in your repo.
+# All settings are optional — defaults are shown below.
+# ──────────────────────────────────────────────────────
+
+# Custom spec template (path relative to repo root)
+# spec_template: .kiln/spec-template.md
+
+# Files/dirs that agents must NEVER modify
+protected_paths:
+  - .github/
+  - .env
+  - CLAUDE.md
+  - .kiln/
+
+# Human review requirements
+human_review:
+  spec: required            # required | optional
+  implementation: auto      # auto (AI review) | required (human must approve)
+
+# Auto-merge when approved + CI green
+auto_merge: true
+
+# Agent timeout in minutes
+timeout_minutes: 30
+
+# Label prefix (labels will be prefix:stage)
+labels:
+  prefix: kiln
+
+# Per-agent configuration
+agents:
+  triage:
+    enabled: true
+
+  spec:
+    enabled: true
+    # template: .kiln/spec-template.md  # Override spec format
+
+  implement:
+    enabled: true
+    run_tests: true
+    run_lint: true
+
+  review:
+    enabled: true
+    auto_approve: false     # If true, AI review can approve without human
+
+  fix:
+    enabled: true
+    max_iterations: 3       # Max fix attempts before flagging for human
