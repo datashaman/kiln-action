@@ -4,7 +4,7 @@ name: "🔥 Kiln"
 on:
   # Triage: classify new issues
   issues:
-    types: [opened, labeled]
+    types: [opened, reopened, labeled]
 
   # Re-triage: re-evaluate after author replies
   issue_comment:
