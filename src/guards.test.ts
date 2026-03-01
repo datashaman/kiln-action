@@ -103,12 +103,63 @@ describe("postStageError", () => {
     const octokit = makeOctokit();
     const context = makeContext({ login: "test", type: "User" });
 
-    await postStageError(octokit, context, "implement", "Timeout");
+    await postStageError(octokit, context, "implement", "Something failed");
 
     expect(octokit.rest.issues.createComment).toHaveBeenCalledWith(
       expect.objectContaining({
         body: expect.stringContaining("implement"),
       }),
+    );
+  });
+
+  it("adds timeout indicator and advice for timeout errors", async () => {
+    const octokit = makeOctokit();
+    const context = makeContext({ login: "test", type: "User" });
+
+    await postStageError(
+      octokit,
+      context,
+      "implement",
+      'Stage "implement" timed out after 120s',
+    );
+
+    const call = (
+      octokit.rest.issues.createComment as unknown as jest.Mock
+    ).mock.calls[0][0];
+    expect(call.body).toContain("⏱️");
+    expect(call.body).toContain("timeout");
+  });
+
+  it("adds timeout indicator for 'timed out' message variations", async () => {
+    const octokit = makeOctokit();
+    const context = makeContext({ login: "test", type: "User" });
+
+    await postStageError(
+      octokit,
+      context,
+      "review",
+      "Claude Code timed out after 30 minutes",
+    );
+
+    const call = (
+      octokit.rest.issues.createComment as unknown as jest.Mock
+    ).mock.calls[0][0];
+    expect(call.body).toContain("⏱️");
+    expect(call.body).toContain("timeout_minutes");
+  });
+
+  it("does not add timeout indicator for non-timeout errors", async () => {
+    const octokit = makeOctokit();
+    const context = makeContext({ login: "test", type: "User" });
+
+    await postStageError(octokit, context, "triage", "API rate limit exceeded");
+
+    const call = (
+      octokit.rest.issues.createComment as unknown as jest.Mock
+    ).mock.calls[0][0];
+    expect(call.body).not.toContain("⏱️");
+    expect(call.body).toBe(
+      "🔥 **Kiln** — Error in triage: API rate limit exceeded",
     );
   });
 

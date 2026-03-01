@@ -32,6 +32,8 @@ outputs:
     description: 'Which stage was executed'
   result:
     description: 'Stage result (success, skipped, blocked, error)'
+  duration:
+    description: 'Stage execution duration in seconds'
   pr_number:
     description: 'PR number created (if applicable)'
 

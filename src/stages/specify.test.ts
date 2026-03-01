@@ -244,6 +244,9 @@ describe("specify", () => {
       const result = await specify(ctx);
 
       expect(result.status).toBe("error");
+      expect(result.reason).toBe(
+        "Spec agent did not create specs/issue-5.md",
+      );
       expect(core.setFailed).toHaveBeenCalledWith(
         "Spec agent did not create specs/issue-5.md",
       );

@@ -417,17 +417,24 @@ function isBotActor(context) {
 /**
  * Post a branded error comment on the relevant issue or PR.
  * Best-effort — failures are logged but not thrown.
+ *
+ * AC2: Error comments are branded "🔥 **Kiln** — Error in {stage}: {message}"
+ * AC5: Timeout errors include a specific timeout indicator
  */
 async function postStageError(octokit, context, stage, message) {
     const issueNumber = context.payload.issue?.number ??
         context.payload.pull_request?.number;
     if (!issueNumber)
         return;
+    const isTimeout = /timed?\s*out/i.test(message);
+    const body = isTimeout
+        ? `🔥 **Kiln** — Error in ${stage}: ⏱️ ${message}\n\nThe stage exceeded the configured timeout. Consider increasing \`timeout_minutes\` or breaking the task into smaller steps.`
+        : `🔥 **Kiln** — Error in ${stage}: ${message}`;
     try {
         await octokit.rest.issues.createComment({
             ...context.repo,
             issue_number: issueNumber,
-            body: `🔥 **Kiln** — Error in ${stage}: ${message}`,
+            body,
         });
     }
     catch {
@@ -480,6 +487,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.run = run;
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
 const blocked_1 = __nccwpck_require__(9804);
@@ -557,25 +565,46 @@ async function run() {
             token,
         };
         // AC3: Stage failures post error comment and don't advance pipeline
+        const startTime = Date.now();
         let result;
         try {
             result = await handler(ctx);
         }
         catch (stageError) {
-            const errorMsg = stageError instanceof Error ? stageError.message : String(stageError);
+            const durationMs = Date.now() - startTime;
+            const durationSec = Math.round(durationMs / 1000);
+            // AC5: Detect timeout errors and produce a specific message
+            const isTimeout = stageError instanceof Error &&
+                "killed" in stageError &&
+                stageError.killed;
+            const errorMsg = isTimeout
+                ? `Stage "${stage}" timed out after ${durationSec}s`
+                : stageError instanceof Error
+                    ? stageError.message
+                    : String(stageError);
             core.error(`🔥 Kiln — Stage "${stage}" failed: ${errorMsg}`);
             await (0, guards_1.postStageError)(octokit, context, stage, errorMsg);
             core.setOutput("stage", stage);
             core.setOutput("result", "error");
+            core.setOutput("duration", durationSec.toString());
             core.setFailed(`🔥 Kiln — Stage "${stage}" failed: ${errorMsg}`);
             return;
         }
+        const durationMs = Date.now() - startTime;
+        const durationSec = Math.round(durationMs / 1000);
         core.setOutput("stage", stage);
         core.setOutput("result", result?.status || "success");
+        core.setOutput("duration", durationSec.toString());
         if (result?.prNumber) {
             core.setOutput("pr_number", result.prNumber.toString());
         }
-        core.info(`🔥 Kiln — Stage "${stage}" completed.`);
+        // AC1: Post error comment for stages that return error status
+        if (result?.status === "error") {
+            const reason = result.reason || "unknown error";
+            core.error(`🔥 Kiln — Stage "${stage}" returned error: ${reason}`);
+            await (0, guards_1.postStageError)(octokit, context, stage, reason);
+        }
+        core.info(`🔥 Kiln — Stage "${stage}" completed in ${durationSec}s.`);
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
@@ -1046,8 +1075,9 @@ async function approveSpec(ctx) {
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        core.setFailed(`Failed to merge spec PR: ${message}`);
-        return { status: "error" };
+        const reason = `Failed to merge spec PR: ${message}`;
+        core.setFailed(reason);
+        return { status: "error", reason };
     }
     // Extract issue number from branch name (kiln/spec/issue-{number})
     const branchName = pr.head?.ref;
@@ -1283,8 +1313,9 @@ async function implement(ctx) {
     }
     (0, child_process_1.execSync)("git fetch origin main && git checkout main && git pull origin main");
     if (!fs.existsSync(specPath)) {
-        core.setFailed(`Spec not found at ${specPath}. Was the spec PR merged?`);
-        return { status: "error" };
+        const reason = `Spec not found at ${specPath}. Was the spec PR merged?`;
+        core.setFailed(reason);
+        return { status: "error", reason };
     }
     (0, child_process_1.execSync)('git config user.name "kiln[bot]"');
     (0, child_process_1.execSync)('git config user.email "kiln[bot]@users.noreply.github.com"');
@@ -1965,8 +1996,9 @@ Then push the branch.`;
     (0, claude_1.runClaudeEdit)(prompt, { anthropicKey, timeoutMinutes });
     const specPath = `specs/issue-${issueNum}.md`;
     if (!fs.existsSync(specPath)) {
-        core.setFailed(`Spec agent did not create ${specPath}`);
-        return { status: "error" };
+        const reason = `Spec agent did not create ${specPath}`;
+        core.setFailed(reason);
+        return { status: "error", reason };
     }
     try {
         (0, child_process_1.execSync)(`git add -A && git commit -m "docs: add spec for issue #${issueNum}" --allow-empty`);

@@ -29,7 +29,7 @@ const STAGES: Record<string, StageHandler> = {
   release: ship,
 };
 
-async function run(): Promise<void> {
+export async function run(): Promise<void> {
   try {
     const token = core.getInput("github_token");
     const anthropicKey = core.getInput("anthropic_api_key");
@@ -94,27 +94,54 @@ async function run(): Promise<void> {
     };
 
     // AC3: Stage failures post error comment and don't advance pipeline
+    const startTime = Date.now();
     let result: StageResult;
     try {
       result = await handler(ctx);
     } catch (stageError) {
-      const errorMsg =
-        stageError instanceof Error ? stageError.message : String(stageError);
+      const durationMs = Date.now() - startTime;
+      const durationSec = Math.round(durationMs / 1000);
+
+      // AC5: Detect timeout errors and produce a specific message
+      const isTimeout =
+        stageError instanceof Error &&
+        "killed" in stageError &&
+        (stageError as NodeJS.ErrnoException & { killed?: boolean }).killed;
+      const errorMsg = isTimeout
+        ? `Stage "${stage}" timed out after ${durationSec}s`
+        : stageError instanceof Error
+          ? stageError.message
+          : String(stageError);
+
       core.error(`🔥 Kiln — Stage "${stage}" failed: ${errorMsg}`);
       await postStageError(octokit, context, stage, errorMsg);
       core.setOutput("stage", stage);
       core.setOutput("result", "error");
+      core.setOutput("duration", durationSec.toString());
       core.setFailed(`🔥 Kiln — Stage "${stage}" failed: ${errorMsg}`);
       return;
     }
 
+    const durationMs = Date.now() - startTime;
+    const durationSec = Math.round(durationMs / 1000);
+
     core.setOutput("stage", stage);
     core.setOutput("result", result?.status || "success");
+    core.setOutput("duration", durationSec.toString());
     if (result?.prNumber) {
       core.setOutput("pr_number", result.prNumber.toString());
     }
 
-    core.info(`🔥 Kiln — Stage "${stage}" completed.`);
+    // AC1: Post error comment for stages that return error status
+    if (result?.status === "error") {
+      const reason = result.reason || "unknown error";
+      core.error(`🔥 Kiln — Stage "${stage}" returned error: ${reason}`);
+      await postStageError(octokit, context, stage, reason);
+    }
+
+    core.info(
+      `🔥 Kiln — Stage "${stage}" completed in ${durationSec}s.`,
+    );
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
     core.setFailed(`🔥 Kiln failed: ${message}`);

@@ -123,7 +123,7 @@ describe("approveSpec", () => {
       expect(core.info).toHaveBeenCalledWith("Spec PR #10 merged.");
     });
 
-    it("returns error if merge fails", async () => {
+    it("returns error with reason if merge fails", async () => {
       const ctx = makeCtx();
       (ctx.octokit.rest.pulls.merge as unknown as jest.Mock).mockRejectedValue(
         new Error("Merge conflict"),
@@ -131,6 +131,9 @@ describe("approveSpec", () => {
 
       const result = await approveSpec(ctx);
       expect(result.status).toBe("error");
+      expect(result.reason).toBe(
+        "Failed to merge spec PR: Merge conflict",
+      );
       expect(core.setFailed).toHaveBeenCalledWith(
         "Failed to merge spec PR: Merge conflict",
       );

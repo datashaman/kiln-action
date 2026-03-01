@@ -35,8 +35,9 @@ export default async function implement(
   );
 
   if (!fs.existsSync(specPath)) {
-    core.setFailed(`Spec not found at ${specPath}. Was the spec PR merged?`);
-    return { status: "error" };
+    const reason = `Spec not found at ${specPath}. Was the spec PR merged?`;
+    core.setFailed(reason);
+    return { status: "error", reason };
   }
 
   execSync('git config user.name "kiln[bot]"');

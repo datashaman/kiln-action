@@ -123,8 +123,9 @@ Then push the branch.`;
 
   const specPath = `specs/issue-${issueNum}.md`;
   if (!fs.existsSync(specPath)) {
-    core.setFailed(`Spec agent did not create ${specPath}`);
-    return { status: "error" };
+    const reason = `Spec agent did not create ${specPath}`;
+    core.setFailed(reason);
+    return { status: "error", reason };
   }
 
   try {

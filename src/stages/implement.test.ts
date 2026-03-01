@@ -140,6 +140,7 @@ describe("implement", () => {
       const result = await implement(ctx);
 
       expect(result.status).toBe("error");
+      expect(result.reason).toContain("Spec not found");
       expect(core.setFailed).toHaveBeenCalledWith(
         expect.stringContaining("Spec not found"),
       );

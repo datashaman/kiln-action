@@ -308,6 +308,9 @@
   - Loop prevention guards are in `src/guards.ts`: `isBotActor` (actor check) and `postStageError` (error comments)
   - Duplicate PR prevention uses `pulls.list` with `head` filter and `state: "open"` — add `pulls.list` to mock Octokit in tests
   - Concurrent events are handled via last-write-wins: label operations are idempotent, duplicate PR checks prevent race conditions
+- `run()` is exported from `index.ts` — testable via `require("./index")` with mocked deps
+- Stages returning `{ status: "error" }` should always include a `reason` field
+- `action.yml` outputs: `stage`, `result`, `duration` (seconds), `pr_number`
 ---
 
 ## 2026-03-01 - US-014
@@ -334,5 +337,38 @@
   - Duplicate PR check uses `pulls.list` with `head: "{owner}:{branch}"` (must include owner prefix) and `state: "open"`
   - When adding `pulls.list` to mock Octokit, existing tests still work because `pulls.list` defaults to returning empty array
   - `postStageError` is best-effort (catches failures) to avoid masking the original error
-  - The `run()` function in index.ts cannot be easily unit-tested because it's auto-executed on module import — extract testable logic into separate modules like `guards.ts`
+  - `run()` is exported from `index.ts` and can be tested via `const { run } = require("./index")` with all dependencies mocked
+  - Stages returning `{ status: "error" }` should include a `reason` field for meaningful error comments
+  - `index.ts` catches both thrown errors and returned error-status results, posting comments via `postStageError` for both
+---
+
+## 2026-03-01 - US-015
+- Implemented all 5 acceptance criteria for Error Handling & Observability
+- AC1 (try/catch + error comments): Outer try/catch in `index.ts` catches all stage errors (thrown and returned). Added handling for stages that return `{ status: "error" }` — these now also get error comments posted via `postStageError`. Updated `specify.ts`, `implement.ts`, and `approve-spec.ts` to include `reason` in their error return values.
+- AC2 (branded error comments): `postStageError` in `guards.ts` already uses `🔥 **Kiln** — Error in {stage}: {message}` format. Enhanced with timeout-specific branding (⏱️ indicator + advice to increase `timeout_minutes`).
+- AC3 (step outputs): Added `duration` output to `action.yml`. `index.ts` now tracks `Date.now()` before/after stage execution and outputs `duration` (seconds) alongside `stage` and `result`. Duration is output on both success and error paths.
+- AC4 (no pipeline advancement on error): Thrown errors are caught before any label changes. Stages that fail internally return `{ status: "error" }` before reaching label transition code. The outer handler in `index.ts` detects error returns and logs/reports them.
+- AC5 (timeout error messages): `index.ts` detects `killed: true` property on thrown errors (set by `execSync` when process is killed due to timeout) and generates a specific "timed out after Ns" message. `postStageError` in `guards.ts` detects "timed out" in messages and adds ⏱️ indicator + advice.
+- Exported `run()` from `index.ts` to enable direct testing
+- Wrote 21 tests in `src/index.test.ts` covering all 5 AC
+- Updated existing tests in `guards.test.ts` (+4 tests for timeout branding), `specify.test.ts`, `implement.test.ts`, `approve-spec.test.ts` (reason field checks)
+- Files changed:
+  - action.yml (added `duration` output)
+  - src/index.ts (exported `run()`, added timing/duration tracking, timeout detection, error-status comment posting)
+  - src/index.test.ts (new — 21 tests)
+  - src/guards.ts (enhanced `postStageError` with timeout-specific branding and advice)
+  - src/guards.test.ts (added 4 timeout branding tests)
+  - src/stages/specify.ts (added `reason` to error return)
+  - src/stages/specify.test.ts (added reason field check)
+  - src/stages/implement.ts (added `reason` to error return)
+  - src/stages/implement.test.ts (added reason field check)
+  - src/stages/approve-spec.ts (added `reason` to error return)
+  - src/stages/approve-spec.test.ts (added reason field check)
+  - dist/index.js (rebuilt)
+- **Learnings for future iterations:**
+  - `run()` in `index.ts` can be tested by exporting it and using `const { run } = require("./index")` in test files with all dependencies mocked via `jest.mock()`
+  - Stages that return `{ status: "error" }` (vs throwing) need to include a `reason` field so the orchestrator can post meaningful error comments
+  - `execSync` timeout kills set `error.killed = true` — check with `"killed" in error && error.killed` to detect timeouts
+  - `postStageError` uses regex `/timed?\s*out/i` to detect timeout-related messages and add timeout-specific UI (⏱️ + advice)
+  - The `duration` output uses `Math.round((Date.now() - startTime) / 1000)` for seconds — simple and sufficient
 ---

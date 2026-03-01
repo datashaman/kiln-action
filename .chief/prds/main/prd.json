@@ -247,7 +247,8 @@
         "Timeout errors produce a specific message indicating the stage timed out"
       ],
       "priority": 15,
-      "passes": false
+      "passes": true,
+      "inProgress": false
     },
     {
       "id": "US-016",

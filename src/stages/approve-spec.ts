@@ -21,8 +21,9 @@ export default async function approveSpec(
     core.info(`Spec PR #${pr.number} merged.`);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    core.setFailed(`Failed to merge spec PR: ${message}`);
-    return { status: "error" };
+    const reason = `Failed to merge spec PR: ${message}`;
+    core.setFailed(reason);
+    return { status: "error", reason };
   }
 
   // Extract issue number from branch name (kiln/spec/issue-{number})
