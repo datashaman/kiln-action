@@ -1,4 +1,5 @@
-import { execSync } from "child_process";
+import { query } from "@anthropic-ai/claude-agent-sdk";
+import type { SDKResultMessage } from "@anthropic-ai/claude-agent-sdk";
 import * as core from "@actions/core";
 import { Octokit } from "./types";
 import { Context } from "@actions/github/lib/context";
@@ -26,20 +27,64 @@ export interface ClaudeResult {
 }
 
 const DEFAULT_TIMEOUT_MINUTES = 30;
-const MAX_BUFFER_BYTES = 10 * 1024 * 1024; // 10MB
+
+const READ_ONLY_TOOLS = ["Read", "Glob", "Grep"];
+const EDIT_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"];
 
 /**
- * Shared utility to invoke Claude Code via the CLI.
+ * Call the Claude Agent SDK and extract the final result text.
+ */
+async function extractResult(
+  prompt: string,
+  anthropicKey: string,
+  timeoutMs: number,
+  allowEdits: boolean,
+): Promise<string> {
+  const abortController = new AbortController();
+  const timer = setTimeout(() => abortController.abort(), timeoutMs);
+
+  try {
+    let resultMessage: SDKResultMessage | undefined;
+
+    const stream = query({
+      prompt,
+      options: {
+        allowedTools: allowEdits ? EDIT_TOOLS : READ_ONLY_TOOLS,
+        permissionMode: "bypassPermissions",
+        allowDangerouslySkipPermissions: true,
+        abortController,
+        env: { ...process.env, ANTHROPIC_API_KEY: anthropicKey },
+      },
+    });
+
+    for await (const message of stream) {
+      if (message.type === "result") {
+        resultMessage = message as SDKResultMessage;
+      }
+    }
+
+    if (!resultMessage) {
+      throw new Error("No result received from Claude Agent SDK");
+    }
+
+    if (resultMessage.subtype !== "success") {
+      const errorResult = resultMessage as SDKResultMessage & { errors?: string[] };
+      throw new Error(errorResult.errors?.join("; ") || `Claude SDK error: ${resultMessage.subtype}`);
+    }
+
+    return resultMessage.result.trim();
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
+/**
+ * Shared utility to invoke Claude Code via the Agent SDK.
  *
  * This is Kiln's integration layer for AI stages. All stages use this
  * function to interact with Claude, ensuring a consistent pattern for
  * prompt delivery, output capture, timeout handling, error surfacing,
  * and API-key security.
- *
- * Mirrors the interface of anthropics/claude-code-action@v1:
- * - Accepts a prompt string (equivalent to direct_prompt)
- * - Passes the API key via environment variable (never logged)
- * - Hard-coded 30-minute default timeout (matching v1)
  */
 export async function invokeClaude(
   prompt: string,
@@ -55,26 +100,11 @@ export async function invokeClaude(
 
   const timeoutMs = timeoutMinutes * 60 * 1000;
 
-  // --print mode = read-only (no file edits); omit for edit mode
-  const command = allowEdits ? "claude" : "claude --print";
-
   try {
-    // Pass prompt via stdin to avoid shell escaping issues with complex input
-    const output = execSync(command, {
-      input: prompt,
-      env: {
-        ...process.env,
-        ANTHROPIC_API_KEY: anthropicKey,
-      },
-      timeout: timeoutMs,
-      maxBuffer: MAX_BUFFER_BYTES,
-      encoding: "utf-8",
-    });
-
-    return { output: output.trim(), success: true };
+    const output = await extractResult(prompt, anthropicKey, timeoutMs, allowEdits);
+    return { output, success: true };
   } catch (error) {
-    const isTimeout =
-      error instanceof Error && "killed" in error && (error as NodeJS.ErrnoException & { killed?: boolean }).killed;
+    const isTimeout = error instanceof Error && error.name === "AbortError";
     const errorMessage = isTimeout
       ? `Claude Code timed out after ${timeoutMinutes} minutes`
       : error instanceof Error
@@ -91,28 +121,21 @@ export async function invokeClaude(
 }
 
 /**
- * Convenience wrapper: invoke Claude in read-only mode (--print).
+ * Convenience wrapper: invoke Claude in read-only mode.
  * Used by triage and review stages.
  */
-export function runClaude(
+export async function runClaude(
   prompt: string,
   options: { anthropicKey: string; timeoutMinutes?: number },
-): string {
+): Promise<string> {
   const { anthropicKey, timeoutMinutes = DEFAULT_TIMEOUT_MINUTES } = options;
   const timeoutMs = timeoutMinutes * 60 * 1000;
 
   try {
-    const output = execSync("claude --print", {
-      input: prompt,
-      env: { ...process.env, ANTHROPIC_API_KEY: anthropicKey },
-      timeout: timeoutMs,
-      maxBuffer: MAX_BUFFER_BYTES,
-      encoding: "utf-8",
-    });
-    return output.trim();
+    return await extractResult(prompt, anthropicKey, timeoutMs, false);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    core.error(`Claude CLI failed: ${message}`);
+    core.error(`Claude SDK failed: ${message}`);
     throw error;
   }
 }
@@ -121,25 +144,18 @@ export function runClaude(
  * Convenience wrapper: invoke Claude in edit mode (can modify files).
  * Used by specify, implement, and fix stages.
  */
-export function runClaudeEdit(
+export async function runClaudeEdit(
   prompt: string,
   options: { anthropicKey: string; timeoutMinutes?: number },
-): string {
+): Promise<string> {
   const { anthropicKey, timeoutMinutes = DEFAULT_TIMEOUT_MINUTES } = options;
   const timeoutMs = timeoutMinutes * 60 * 1000;
 
   try {
-    const output = execSync("claude", {
-      input: prompt,
-      env: { ...process.env, ANTHROPIC_API_KEY: anthropicKey },
-      timeout: timeoutMs,
-      maxBuffer: MAX_BUFFER_BYTES,
-      encoding: "utf-8",
-    });
-    return output.trim();
+    return await extractResult(prompt, anthropicKey, timeoutMs, true);
   } catch (error) {
     const message = error instanceof Error ? error.message : String(error);
-    core.error(`Claude CLI (edit) failed: ${message}`);
+    core.error(`Claude SDK (edit) failed: ${message}`);
     throw error;
   }
 }

@@ -107,8 +107,8 @@ function makeCtx(overrides: Partial<KilnContext> = {}): KilnContext {
 beforeEach(() => {
   jest.clearAllMocks();
   mockedExecSync.mockReturnValue("");
-  mockedRunClaudeEdit.mockReturnValue("");
-  mockedRunClaude.mockReturnValue("Added input validation for user data.");
+  mockedRunClaudeEdit.mockResolvedValue("");
+  mockedRunClaude.mockResolvedValue("Added input validation for user data.");
 });
 
 describe("fix", () => {

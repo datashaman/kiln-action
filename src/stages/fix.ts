@@ -84,7 +84,7 @@ Read each piece of feedback carefully and fix every issue:
 After fixing, commit with message: "fix: address review feedback (kiln-fix #${fixCount + 1})"
 Then push to the current branch.`;
 
-  runClaudeEdit(prompt, { anthropicKey, timeoutMinutes });
+  await runClaudeEdit(prompt, { anthropicKey, timeoutMinutes });
 
   try {
     execSync(`git push origin ${pr.head.ref}`);
@@ -101,7 +101,7 @@ Then push to the current branch.`;
 
 The fix agent has addressed this feedback. Write a brief, specific reply (1-3 sentences) explaining what was changed to address this comment. Be concrete about the fix, not vague. Do NOT use markdown code blocks. Just output the reply text directly.`;
 
-      const reply = runClaude(replyPrompt, { anthropicKey, timeoutMinutes: 2 });
+      const reply = await runClaude(replyPrompt, { anthropicKey, timeoutMinutes: 2 });
 
       await octokit.rest.pulls.createReplyForReviewComment({
         ...context.repo,
