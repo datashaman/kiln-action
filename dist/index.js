@@ -110,70 +110,33 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.invokeClaude = invokeClaude;
 exports.runClaude = runClaude;
 exports.runClaudeEdit = runClaudeEdit;
-const claude_agent_sdk_1 = __nccwpck_require__(3254);
+const child_process_1 = __nccwpck_require__(5317);
 const core = __importStar(__nccwpck_require__(7484));
 const DEFAULT_TIMEOUT_MINUTES = 30;
-const READ_ONLY_TOOLS = ["Read", "Glob", "Grep"];
-const EDIT_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"];
 /**
- * Call the Claude Agent SDK and extract the final result text.
+ * Call the Claude Code CLI and return its stdout.
+ *
+ * - Read-only mode: `claude --print --dangerously-skip-permissions`
+ * - Edit mode: `claude --dangerously-skip-permissions`
+ *
+ * The prompt is passed via stdin; the API key via ANTHROPIC_API_KEY env var.
  */
-async function extractResult(prompt, anthropicKey, timeoutMs, allowEdits) {
-    const abortController = new AbortController();
-    const timer = setTimeout(() => abortController.abort(), timeoutMs);
-    const stderrChunks = [];
-    try {
-        let resultMessage;
-        const stream = (0, claude_agent_sdk_1.query)({
-            prompt,
-            options: {
-                tools: allowEdits ? EDIT_TOOLS : READ_ONLY_TOOLS,
-                permissionMode: "bypassPermissions",
-                allowDangerouslySkipPermissions: true,
-                persistSession: false,
-                abortController,
-                env: { ...process.env, ANTHROPIC_API_KEY: anthropicKey },
-                stderr: (data) => {
-                    stderrChunks.push(data);
-                    core.warning(`Claude SDK stderr: ${data.trimEnd()}`);
-                },
-            },
-        });
-        try {
-            for await (const message of stream) {
-                if (message.type === "result") {
-                    resultMessage = message;
-                }
-            }
-        }
-        catch (streamError) {
-            // Re-throw AbortError as-is for timeout detection
-            if (streamError instanceof Error && streamError.name === "AbortError") {
-                throw streamError;
-            }
-            // Enrich other SDK process errors with captured stderr
-            const stderr = stderrChunks.join("");
-            const baseMsg = streamError instanceof Error ? streamError.message : String(streamError);
-            throw new Error(`${baseMsg}${stderr ? `\nstderr: ${stderr}` : ""}`);
-        }
-        if (!resultMessage) {
-            const stderr = stderrChunks.join("");
-            throw new Error(`No result received from Claude Agent SDK${stderr ? `\nstderr: ${stderr}` : ""}`);
-        }
-        if (resultMessage.subtype !== "success") {
-            const errorResult = resultMessage;
-            const stderr = stderrChunks.join("");
-            const baseMsg = errorResult.errors?.join("; ") || `Claude SDK error: ${resultMessage.subtype}`;
-            throw new Error(`${baseMsg}${stderr ? `\nstderr: ${stderr}` : ""}`);
-        }
-        return resultMessage.result.trim();
-    }
-    finally {
-        clearTimeout(timer);
-    }
+function execClaude(prompt, anthropicKey, timeoutMs, allowEdits) {
+    const args = allowEdits
+        ? ["claude", "--dangerously-skip-permissions"]
+        : ["claude", "--print", "--dangerously-skip-permissions"];
+    const result = (0, child_process_1.execSync)(args.join(" "), {
+        input: prompt,
+        timeout: timeoutMs,
+        encoding: "utf-8",
+        env: { ...process.env, ANTHROPIC_API_KEY: anthropicKey },
+        maxBuffer: 50 * 1024 * 1024, // 50 MB
+        stdio: ["pipe", "pipe", "pipe"],
+    });
+    return result.trim();
 }
 /**
- * Shared utility to invoke Claude Code via the Agent SDK.
+ * Shared utility to invoke Claude Code via the CLI.
  *
  * This is Kiln's integration layer for AI stages. All stages use this
  * function to interact with Claude, ensuring a consistent pattern for
@@ -184,11 +147,11 @@ async function invokeClaude(prompt, config) {
     const { anthropicKey, timeoutMinutes = DEFAULT_TIMEOUT_MINUTES, allowEdits = false, octokit, context, } = config;
     const timeoutMs = timeoutMinutes * 60 * 1000;
     try {
-        const output = await extractResult(prompt, anthropicKey, timeoutMs, allowEdits);
+        const output = execClaude(prompt, anthropicKey, timeoutMs, allowEdits);
         return { output, success: true };
     }
     catch (error) {
-        const isTimeout = error instanceof Error && error.name === "AbortError";
+        const isTimeout = error instanceof Error && error.code === "ETIMEDOUT";
         const errorMessage = isTimeout
             ? `Claude Code timed out after ${timeoutMinutes} minutes`
             : error instanceof Error
@@ -208,11 +171,11 @@ async function runClaude(prompt, options) {
     const { anthropicKey, timeoutMinutes = DEFAULT_TIMEOUT_MINUTES } = options;
     const timeoutMs = timeoutMinutes * 60 * 1000;
     try {
-        return await extractResult(prompt, anthropicKey, timeoutMs, false);
+        return execClaude(prompt, anthropicKey, timeoutMs, false);
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        core.error(`Claude SDK failed: ${message}`);
+        core.error(`Claude CLI failed: ${message}`);
         throw error;
     }
 }
@@ -224,11 +187,11 @@ async function runClaudeEdit(prompt, options) {
     const { anthropicKey, timeoutMinutes = DEFAULT_TIMEOUT_MINUTES } = options;
     const timeoutMs = timeoutMinutes * 60 * 1000;
     try {
-        return await extractResult(prompt, anthropicKey, timeoutMs, true);
+        return execClaude(prompt, anthropicKey, timeoutMs, true);
     }
     catch (error) {
         const message = error instanceof Error ? error.message : String(error);
-        core.error(`Claude SDK (edit) failed: ${message}`);
+        core.error(`Claude CLI (edit) failed: ${message}`);
         throw error;
     }
 }
@@ -36226,14 +36189,6 @@ function wrappy (fn, cb) {
   }
 }
 
-
-/***/ }),
-
-/***/ 3254:
-/***/ ((module) => {
-
-"use strict";
-module.exports = require("@anthropic-ai/claude-agent-sdk");
 
 /***/ }),
 

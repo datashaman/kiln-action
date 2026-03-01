@@ -45,6 +45,9 @@ jobs:
           fetch-depth: 0
           token: ${{ steps.app-token.outputs.token }}
 
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
       # Dogfood: use the action from this repo itself
       - uses: ./
         with:

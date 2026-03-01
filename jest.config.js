@@ -3,7 +3,4 @@ module.exports = {
   preset: "ts-jest",
   testEnvironment: "node",
   testMatch: ["**/*.test.ts"],
-  moduleNameMapper: {
-    "^@anthropic-ai/claude-agent-sdk$": "<rootDir>/src/__mocks__/@anthropic-ai/claude-agent-sdk.ts",
-  },
 };
