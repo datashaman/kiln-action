@@ -25,15 +25,15 @@ export function detectStage(context: Context): RouteResult | null {
     const issueNumber = payload.issue?.number as number | undefined;
     const issueLabels = extractLabels(payload.issue?.labels);
 
-    // New issue opened → triage
-    if (payload.action === "opened") {
+    // New or reopened issue → triage
+    if (payload.action === "opened" || payload.action === "reopened") {
       const result: RouteResult = {
         stage: "triage",
         issueNumber,
         labels: issueLabels,
         payload: payload as unknown as Record<string, unknown>,
       };
-      core.info(`🔥 Kiln Router — Matched stage: triage (issues.opened)`);
+      core.info(`🔥 Kiln Router — Matched stage: triage (issues.${payload.action})`);
       return result;
     }
 

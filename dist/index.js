@@ -881,15 +881,15 @@ function detectStage(context) {
     if (eventName === "issues") {
         const issueNumber = payload.issue?.number;
         const issueLabels = extractLabels(payload.issue?.labels);
-        // New issue opened → triage
-        if (payload.action === "opened") {
+        // New or reopened issue → triage
+        if (payload.action === "opened" || payload.action === "reopened") {
             const result = {
                 stage: "triage",
                 issueNumber,
                 labels: issueLabels,
                 payload: payload,
             };
-            core.info(`🔥 Kiln Router — Matched stage: triage (issues.opened)`);
+            core.info(`🔥 Kiln Router — Matched stage: triage (issues.${payload.action})`);
             return result;
         }
         // Labeled events — check which label was just added

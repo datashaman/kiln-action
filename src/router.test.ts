@@ -32,6 +32,17 @@ describe("detectStage", () => {
       expect(result!.issueNumber).toBe(42);
       expect(result!.labels).toEqual([]);
     });
+
+    it("returns triage stage for reopened issue", () => {
+      const ctx = makeContext("issues", {
+        action: "reopened",
+        issue: { number: 43, labels: [{ name: "enhancement" }] },
+      });
+      const result = detectStage(ctx);
+      expect(result).not.toBeNull();
+      expect(result!.stage).toBe("triage");
+      expect(result!.issueNumber).toBe(43);
+    });
   });
 
   // ── issue_comment.created → re-triage ─────────────────
