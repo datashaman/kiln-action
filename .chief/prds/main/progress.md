@@ -4,9 +4,11 @@
 - `dist/index.js` must be committed (required by GitHub Actions runtime)
 - `lib/` is gitignored (intermediate build output)
 - ESLint configured with `@typescript-eslint/parser` and `@typescript-eslint/eslint-plugin`
-- Jest configured with `--passWithNoTests` flag
+- Jest configured with `ts-jest` preset, config in `jest.config.js`, tests use `*.test.ts` suffix
 - All stage handlers are in `src/stages/` as default exports
-- Shared types in `src/types.ts` (KilnContext, StageResult, KilnConfig, Octokit)
+- Shared types in `src/types.ts` (KilnContext, StageResult, RouteResult, KilnConfig, Octokit)
+- Router returns `RouteResult` with stage name, issueNumber, prNumber, labels, and payload
+- Stage name mapping in index.ts: `re-triage` → triage handler, `release` → ship handler
 - `action.yml` uses `node24` runtime
 - Only `anthropic_api_key` is a required input; others have defaults
 
@@ -36,4 +38,27 @@
   - Context type is from `@actions/github/lib/context`
   - `deepMerge` in config.ts needs explicit `unknown` casting to bridge between `KilnConfig` and `Record<string, unknown>`
   - GitHub Actions requires `dist/` to be committed for the action to work
+---
+
+## 2026-03-01 - US-002
+- Implemented Event Router with full event-to-stage mapping per acceptance criteria
+- Router now returns `RouteResult` object with parsed context (stage, issueNumber, prNumber, labels, payload)
+- Stage names aligned with AC: `re-triage` for issue comments, `release` for approved impl PRs / check_suite
+- Router logs which stage was matched (or "No matching stage") via `core.info`
+- Updated `index.ts` STAGES map to route `re-triage` → triage handler and `release` → ship handler
+- Set up Jest testing infrastructure with `ts-jest`
+- Added 21 comprehensive tests covering all event mappings, logging, parsed context, and edge cases
+- Files changed:
+  - src/router.ts (rewritten: returns `RouteResult`, adds logging, stage name changes)
+  - src/types.ts (added `RouteResult` interface)
+  - src/index.ts (updated STAGES map for re-triage/release, handles `RouteResult` return)
+  - src/router.test.ts (new - 21 tests)
+  - jest.config.js (new)
+  - package.json / package-lock.json (added ts-jest, @types/jest)
+  - dist/index.js (rebuilt)
+- **Learnings for future iterations:**
+  - Jest needs `jest.config.js` (not `.ts`) unless `ts-node` is installed
+  - Mock `@actions/core` with `jest.mock` to test logging calls
+  - Create `makeContext` helper to build minimal `Context` objects for router tests
+  - The router's `extractLabels` helper safely handles missing/undefined label arrays
 ---

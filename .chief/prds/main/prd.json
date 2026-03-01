@@ -28,7 +28,7 @@
         "Router passes parsed context (issue number, PR number, labels, event payload) to the selected stage handler"
       ],
       "priority": 2,
-      "passes": false
+      "passes": true
     },
     {
       "id": "US-003",
