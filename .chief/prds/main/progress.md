@@ -1,0 +1,39 @@
+## Codebase Patterns
+- TypeScript source in `src/`, compiled to `lib/` via `tsc`, then bundled to `dist/` via `ncc`
+- Build pipeline: `tsc && ncc build lib/index.js -o dist`
+- `dist/index.js` must be committed (required by GitHub Actions runtime)
+- `lib/` is gitignored (intermediate build output)
+- ESLint configured with `@typescript-eslint/parser` and `@typescript-eslint/eslint-plugin`
+- Jest configured with `--passWithNoTests` flag
+- All stage handlers are in `src/stages/` as default exports
+- Shared types in `src/types.ts` (KilnContext, StageResult, KilnConfig, Octokit)
+- `action.yml` uses `node24` runtime
+- Only `anthropic_api_key` is a required input; others have defaults
+
+## 2026-03-01 - US-001
+- Converted project from JavaScript to TypeScript
+- Set up TypeScript build pipeline: tsc → ncc → dist/
+- Updated action.yml to use node24 and datashaman author
+- Created .eslintrc.json for TypeScript linting
+- Added tsconfig.json with strict mode
+- Files changed:
+  - action.yml (node20 → node24, author fix)
+  - package.json (TypeScript deps, build scripts, lint script)
+  - tsconfig.json (new)
+  - .eslintrc.json (new)
+  - .gitignore (added /lib/, removed /dist/)
+  - src/types.ts (new - shared type definitions)
+  - src/index.ts (converted from .js)
+  - src/router.ts (converted from .js)
+  - src/config.ts (converted from .js)
+  - src/labels.ts (converted from .js)
+  - src/claude.ts (converted from .js)
+  - src/stages/*.ts (all 7 stages converted from .js)
+  - dist/index.js (rebuilt)
+- **Learnings for future iterations:**
+  - The project uses `@actions/core` and `@actions/github` for GitHub Actions integration
+  - The Octokit type is `InstanceType<typeof GitHub>` from `@actions/github/lib/utils`
+  - Context type is from `@actions/github/lib/context`
+  - `deepMerge` in config.ts needs explicit `unknown` casting to bridge between `KilnConfig` and `Record<string, unknown>`
+  - GitHub Actions requires `dist/` to be committed for the action to work
+---

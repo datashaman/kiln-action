@@ -15,7 +15,7 @@
         "Entry point (src/index.ts) reads the GitHub event payload and invokes the router"
       ],
       "priority": 1,
-      "passes": false
+      "passes": true
     },
     {
       "id": "US-002",
