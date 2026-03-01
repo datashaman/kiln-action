@@ -148,7 +148,8 @@
         "Comment posted on issue linking to the implementation PR"
       ],
       "priority": 9,
-      "passes": false
+      "passes": true,
+      "inProgress": false
     },
     {
       "id": "US-010",

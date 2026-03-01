@@ -1142,7 +1142,7 @@ After implementing, commit all changes and push to the current branch.`;
     }
     const { data: pr } = await octokit.rest.pulls.create({
         ...context.repo,
-        title: `🔨 Kiln: ${issue.title}`,
+        title: `🔨 Kiln Impl: ${issue.title}`,
         body: [
             `## Implementation for #${issueNum}`,
             "",
