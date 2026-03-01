@@ -4,7 +4,7 @@
   "description": "🔥 Kiln — AI-powered dev pipeline. Issue in, release out.",
   "main": "lib/index.js",
   "scripts": {
-    "build": "tsc && ncc build lib/index.js -o dist",
+    "build": "tsc && ncc build lib/index.js -o dist --external @anthropic-ai/claude-agent-sdk && mkdir -p dist/node_modules/@anthropic-ai && cp -r node_modules/@anthropic-ai/claude-agent-sdk dist/node_modules/@anthropic-ai/claude-agent-sdk",
     "typecheck": "tsc --noEmit",
     "lint": "eslint 'src/**/*.ts'",
     "test": "jest --passWithNoTests"
@@ -21,7 +21,7 @@
     "@types/node": "^25.3.3",
     "@typescript-eslint/eslint-plugin": "^8.56.1",
     "@typescript-eslint/parser": "^8.56.1",
-    "@vercel/ncc": "^0.38.1",
+    "@vercel/ncc": "^0.38.4",
     "eslint": "^8.56.0",
     "jest": "^29.7.0",
     "ts-jest": "^29.4.6",
