@@ -1,24 +1,20 @@
-# .github/workflows/kiln.yml
-name: "🔥 Kiln"
+# ──────────────────────────────────────────────────────
+# Kiln — AI-Powered Dev Pipeline
+#
+# Issue in, release out. No TypeScript, no build step.
+# Pure workflow + Claude Code CLI + gh CLI.
+# ──────────────────────────────────────────────────────
+name: "Kiln"
 
 on:
-  # Triage: classify new issues
   issues:
     types: [opened, reopened, labeled]
-
-  # Re-triage: re-evaluate after author replies
   issue_comment:
     types: [created]
-
-  # Review: AI reviews new/updated implementation PRs
   pull_request:
     types: [opened, synchronize]
-
-  # Approve-spec, Fix, Ship: respond to PR review events
   pull_request_review:
     types: [submitted]
-
-  # Ship: auto-merge when CI passes
   check_suite:
     types: [completed]
 
@@ -26,12 +22,18 @@ permissions:
   issues: write
   contents: write
   pull-requests: write
+  checks: read
 
+# ════════════════════════════════════════════════════════
+# TRIAGE — classify new/reopened issues
+# ════════════════════════════════════════════════════════
 jobs:
-  kiln:
+  triage:
     runs-on: ubuntu-latest
-    # Don't run on events triggered by Kiln itself
-    if: github.actor != 'datashaman-kiln[bot]'
+    if: >-
+      github.event_name == 'issues'
+      && (github.event.action == 'opened' || github.event.action == 'reopened')
+      && github.event.sender.type != 'Bot'
     steps:
       - name: Generate GitHub App token
         id: app-token
@@ -48,8 +50,809 @@ jobs:
       - name: Install Claude Code CLI
         run: npm install -g @anthropic-ai/claude-code
 
-      # Dogfood: use the action from this repo itself
-      - uses: ./
+      - name: Check blocked label
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          PREFIX=$(yq '.labels.prefix // "kiln"' .kiln/config.yml 2>/dev/null || echo "kiln")
+          LABELS=$(gh issue view "${{ github.event.issue.number }}" --json labels -q '.labels[].name')
+          if echo "$LABELS" | grep -q "${PREFIX}:blocked"; then
+            gh issue comment "${{ github.event.issue.number }}" \
+              --body "🔥 **Kiln** — Blocked. Remove the \`${PREFIX}:blocked\` label to resume."
+            exit 0
+          fi
+
+      - name: Triage issue
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          ISSUE_TITLE="${{ github.event.issue.title }}"
+          ISSUE_BODY=$(gh issue view "$ISSUE_NUMBER" --json body -q '.body // "(empty)"')
+          PREFIX=$(yq '.labels.prefix // "kiln"' .kiln/config.yml 2>/dev/null || echo "kiln")
+
+          export ISSUE_NUMBER ISSUE_TITLE ISSUE_BODY
+          PROMPT=$(envsubst '$ISSUE_NUMBER $ISSUE_TITLE $ISSUE_BODY' < .kiln/prompts/triage.md)
+
+          RESULT=$(echo "$PROMPT" | claude --print --dangerously-skip-permissions 2>claude_stderr.txt) || {
+            gh issue comment "$ISSUE_NUMBER" --body "🔥 **Kiln** — Claude error: $(cat claude_stderr.txt)"
+            exit 1
+          }
+
+          # Extract JSON from possible markdown fence
+          JSON=$(echo "$RESULT" | sed -n '/^```json$/,/^```$/p' | sed '1d;$d')
+          if [ -z "$JSON" ]; then
+            JSON=$(echo "$RESULT" | grep -Pzo '\{[\s\S]*\}' | tr '\0' '\n' || true)
+          fi
+          if [ -z "$JSON" ]; then
+            JSON='{"type":"feature","complexity":"m","clear_enough":true,"comment":"Triaged. Moving to specification.","labels":[]}'
+          fi
+
+          TYPE=$(echo "$JSON" | jq -r '.type // "feature"')
+          COMPLEXITY=$(echo "$JSON" | jq -r '.complexity // "m"')
+          CLEAR=$(echo "$JSON" | jq -r '.clear_enough // true')
+          COMMENT=$(echo "$JSON" | jq -r '.comment // "Triaged."')
+
+          # Post branded triage comment
+          gh issue comment "$ISSUE_NUMBER" \
+            --body "$(printf '🔥 **Kiln Triage**\n\n%s\n\n---\n*Type: `%s` · Size: `%s`*' "$COMMENT" "$TYPE" "$COMPLEXITY")"
+
+          # Apply type and size labels
+          gh issue edit "$ISSUE_NUMBER" --add-label "type:${TYPE},size:${COMPLEXITY}"
+
+          # Apply any additional labels from Claude
+          EXTRA_LABELS=$(echo "$JSON" | jq -r '.labels[]? // empty' 2>/dev/null || true)
+          if [ -n "$EXTRA_LABELS" ]; then
+            LABEL_CSV=$(echo "$EXTRA_LABELS" | paste -sd, -)
+            gh issue edit "$ISSUE_NUMBER" --add-label "$LABEL_CSV"
+          fi
+
+          if [ "$CLEAR" = "true" ]; then
+            # Clear enough → move to specifying
+            gh issue edit "$ISSUE_NUMBER" --add-label "${PREFIX}:specifying"
+          else
+            # Not clear → needs info
+            gh issue edit "$ISSUE_NUMBER" --add-label "${PREFIX}:needs-info"
+          fi
+
+  # ════════════════════════════════════════════════════════
+  # RE-TRIAGE — re-evaluate after author comments
+  # ════════════════════════════════════════════════════════
+  retriage:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'issue_comment'
+      && github.event.action == 'created'
+      && github.event.sender.type != 'Bot'
+      && (
+        contains(toJSON(github.event.issue.labels.*.name), ':intake')
+        || contains(toJSON(github.event.issue.labels.*.name), ':needs-info')
+      )
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
         with:
-          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
-          github_token: ${{ steps.app-token.outputs.token }}
+          app-id: ${{ secrets.KILN_APP_ID }}
+          private-key: ${{ secrets.KILN_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Check blocked label
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          PREFIX=$(yq '.labels.prefix // "kiln"' .kiln/config.yml 2>/dev/null || echo "kiln")
+          LABELS=$(gh issue view "${{ github.event.issue.number }}" --json labels -q '.labels[].name')
+          if echo "$LABELS" | grep -q "${PREFIX}:blocked"; then
+            gh issue comment "${{ github.event.issue.number }}" \
+              --body "🔥 **Kiln** — Blocked. Remove the \`${PREFIX}:blocked\` label to resume."
+            exit 0
+          fi
+
+      - name: Re-triage issue
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          ISSUE_TITLE="${{ github.event.issue.title }}"
+          ISSUE_BODY=$(gh issue view "$ISSUE_NUMBER" --json body -q '.body // "(empty)"')
+          PREFIX=$(yq '.labels.prefix // "kiln"' .kiln/config.yml 2>/dev/null || echo "kiln")
+
+          # Fetch all comments to build thread
+          COMMENT_THREAD=$(gh issue view "$ISSUE_NUMBER" --json comments \
+            -q '.comments[] | "**@\(.author.login):** \(.body)"' | paste -sd$'\n\n' -)
+
+          export ISSUE_NUMBER ISSUE_TITLE ISSUE_BODY COMMENT_THREAD
+          PROMPT=$(envsubst '$ISSUE_NUMBER $ISSUE_TITLE $ISSUE_BODY $COMMENT_THREAD' < .kiln/prompts/retriage.md)
+
+          RESULT=$(echo "$PROMPT" | claude --print --dangerously-skip-permissions 2>claude_stderr.txt) || {
+            gh issue comment "$ISSUE_NUMBER" --body "🔥 **Kiln** — Claude error: $(cat claude_stderr.txt)"
+            exit 1
+          }
+
+          # Extract JSON
+          JSON=$(echo "$RESULT" | sed -n '/^```json$/,/^```$/p' | sed '1d;$d')
+          if [ -z "$JSON" ]; then
+            JSON=$(echo "$RESULT" | grep -Pzo '\{[\s\S]*\}' | tr '\0' '\n' || true)
+          fi
+          if [ -z "$JSON" ]; then
+            JSON='{"type":"feature","complexity":"m","clear_enough":true,"comment":"Re-triaged. Moving to specification.","labels":[]}'
+          fi
+
+          CLEAR=$(echo "$JSON" | jq -r '.clear_enough // true')
+          COMMENT=$(echo "$JSON" | jq -r '.comment // "Re-triaged."')
+
+          # Post branded re-triage comment
+          gh issue comment "$ISSUE_NUMBER" --body "$(printf '🔥 **Kiln Re-triage**\n\n%s' "$COMMENT")"
+
+          if [ "$CLEAR" = "true" ]; then
+            # Remove needs-info, add specifying
+            gh issue edit "$ISSUE_NUMBER" --remove-label "${PREFIX}:needs-info" 2>/dev/null || true
+            gh issue edit "$ISSUE_NUMBER" --remove-label "${PREFIX}:intake" 2>/dev/null || true
+            gh issue edit "$ISSUE_NUMBER" --add-label "${PREFIX}:specifying"
+          fi
+
+  # ════════════════════════════════════════════════════════
+  # SPECIFY — write a technical spec from the issue
+  # ════════════════════════════════════════════════════════
+  specify:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'issues'
+      && github.event.action == 'labeled'
+      && endsWith(github.event.label.name, ':specifying')
+      && github.event.sender.type != 'Bot'
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.KILN_APP_ID }}
+          private-key: ${{ secrets.KILN_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Check blocked label
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          PREFIX=$(yq '.labels.prefix // "kiln"' .kiln/config.yml 2>/dev/null || echo "kiln")
+          LABELS=$(gh issue view "${{ github.event.issue.number }}" --json labels -q '.labels[].name')
+          if echo "$LABELS" | grep -q "${PREFIX}:blocked"; then
+            gh issue comment "${{ github.event.issue.number }}" \
+              --body "🔥 **Kiln** — Blocked. Remove the \`${PREFIX}:blocked\` label to resume."
+            exit 0
+          fi
+
+      - name: Write spec
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          ISSUE_TITLE="${{ github.event.issue.title }}"
+          ISSUE_BODY=$(gh issue view "$ISSUE_NUMBER" --json body -q '.body // "(empty)"')
+          PREFIX=$(yq '.labels.prefix // "kiln"' .kiln/config.yml 2>/dev/null || echo "kiln")
+          BRANCH="kiln/spec/issue-${ISSUE_NUMBER}"
+
+          # Check for existing spec PR
+          EXISTING=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number' 2>/dev/null || true)
+          if [ -n "$EXISTING" ]; then
+            echo "Spec PR already exists: #${EXISTING}. Skipping."
+            exit 0
+          fi
+
+          # Load spec template
+          TEMPLATE_PATH=$(yq '.spec_template // .agents.spec.template // ""' .kiln/config.yml 2>/dev/null || echo "")
+          if [ -n "$TEMPLATE_PATH" ] && [ -f "$TEMPLATE_PATH" ]; then
+            SPEC_TEMPLATE=$(cat "$TEMPLATE_PATH")
+          elif [ -f ".kiln/spec-template.md" ]; then
+            SPEC_TEMPLATE=$(cat .kiln/spec-template.md)
+          else
+            SPEC_TEMPLATE="# Spec: [Title]"
+          fi
+
+          # Create branch
+          git config user.name "kiln[bot]"
+          git config user.email "kiln[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+          mkdir -p specs
+
+          export ISSUE_NUMBER ISSUE_TITLE ISSUE_BODY SPEC_TEMPLATE
+          PROMPT=$(envsubst '$ISSUE_NUMBER $ISSUE_TITLE $ISSUE_BODY $SPEC_TEMPLATE' < .kiln/prompts/specify.md)
+
+          echo "$PROMPT" | claude --dangerously-skip-permissions 2>claude_stderr.txt || {
+            gh issue comment "$ISSUE_NUMBER" --body "🔥 **Kiln** — Claude error: $(cat claude_stderr.txt)"
+            exit 1
+          }
+
+          # Ensure spec file exists and is committed
+          SPEC_PATH="specs/issue-${ISSUE_NUMBER}.md"
+          if [ ! -f "$SPEC_PATH" ]; then
+            echo "Spec agent did not create $SPEC_PATH"
+            exit 1
+          fi
+
+          git add -A
+          git diff --cached --quiet || git commit -m "docs: add spec for issue #${ISSUE_NUMBER}"
+          git push origin "$BRANCH" --force
+
+          # Create spec PR
+          PR_BODY=$(printf '## Specification for #%s\n\n*Fired in the Kiln*\n\nReview the spec at `%s`.\n**Approve this PR to trigger implementation.**\n\n---\nTracking issue: #%s' "$ISSUE_NUMBER" "$SPEC_PATH" "$ISSUE_NUMBER")
+
+          PR_URL=$(gh pr create \
+            --title "Kiln Spec: ${ISSUE_TITLE}" \
+            --body "$PR_BODY" \
+            --head "$BRANCH" \
+            --base main)
+
+          PR_NUM=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+
+          # Label the PR
+          gh pr edit "$PR_NUM" --add-label "${PREFIX}:spec,needs-human-review"
+
+          # Comment on the issue
+          gh issue comment "$ISSUE_NUMBER" \
+            --body "$(printf '📋 **Kiln** — Spec ready for review: #%s\n\nApprove the spec PR to start implementation.' "$PR_NUM")"
+
+          # Transition label: specifying → spec-review
+          gh issue edit "$ISSUE_NUMBER" --remove-label "${PREFIX}:specifying" 2>/dev/null || true
+          gh issue edit "$ISSUE_NUMBER" --add-label "${PREFIX}:spec-review"
+
+  # ════════════════════════════════════════════════════════
+  # APPROVE-SPEC — merge spec PR on approval, trigger impl
+  # ════════════════════════════════════════════════════════
+  approve-spec:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'pull_request_review'
+      && github.event.review.state == 'approved'
+      && contains(toJSON(github.event.pull_request.labels.*.name), ':spec')
+      && github.event.sender.type != 'Bot'
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.KILN_APP_ID }}
+          private-key: ${{ secrets.KILN_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Merge spec PR and trigger implementation
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PREFIX=$(yq '.labels.prefix // "kiln"' .kiln/config.yml 2>/dev/null || echo "kiln")
+          BRANCH="${{ github.event.pull_request.head.ref }}"
+
+          # Merge spec PR
+          gh pr merge "$PR_NUMBER" --squash --delete-branch || {
+            echo "Failed to merge spec PR #${PR_NUMBER}"
+            exit 1
+          }
+
+          # Extract issue number from branch name: kiln/spec/issue-{N}
+          ISSUE_NUMBER=$(echo "$BRANCH" | grep -oP 'issue-\K\d+' || true)
+
+          # Fallback: extract from PR body
+          if [ -z "$ISSUE_NUMBER" ]; then
+            ISSUE_NUMBER=$(gh pr view "$PR_NUMBER" --json body -q '.body' | grep -oP 'Tracking issue: #\K\d+' || true)
+          fi
+
+          if [ -z "$ISSUE_NUMBER" ]; then
+            echo "Could not find linked issue number."
+            exit 0
+          fi
+
+          # Transition label: spec-review → implementing
+          gh issue edit "$ISSUE_NUMBER" --remove-label "${PREFIX}:spec-review" 2>/dev/null || true
+          gh issue edit "$ISSUE_NUMBER" --add-label "${PREFIX}:implementing"
+
+          gh issue comment "$ISSUE_NUMBER" \
+            --body "🔨 **Kiln** — Spec approved and merged. Starting implementation."
+
+  # ════════════════════════════════════════════════════════
+  # IMPLEMENT — build the code from the spec
+  # ════════════════════════════════════════════════════════
+  implement:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'issues'
+      && github.event.action == 'labeled'
+      && endsWith(github.event.label.name, ':implementing')
+      && github.event.sender.type != 'Bot'
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.KILN_APP_ID }}
+          private-key: ${{ secrets.KILN_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Check blocked label
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          PREFIX=$(yq '.labels.prefix // "kiln"' .kiln/config.yml 2>/dev/null || echo "kiln")
+          LABELS=$(gh issue view "${{ github.event.issue.number }}" --json labels -q '.labels[].name')
+          if echo "$LABELS" | grep -q "${PREFIX}:blocked"; then
+            gh issue comment "${{ github.event.issue.number }}" \
+              --body "🔥 **Kiln** — Blocked. Remove the \`${PREFIX}:blocked\` label to resume."
+            exit 0
+          fi
+
+      - name: Implement from spec
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          ISSUE_NUMBER="${{ github.event.issue.number }}"
+          ISSUE_TITLE="${{ github.event.issue.title }}"
+          PREFIX=$(yq '.labels.prefix // "kiln"' .kiln/config.yml 2>/dev/null || echo "kiln")
+          BRANCH="kiln/impl/issue-${ISSUE_NUMBER}"
+          SPEC_PATH="specs/issue-${ISSUE_NUMBER}.md"
+
+          # Check for existing implementation PR
+          EXISTING=$(gh pr list --head "$BRANCH" --state open --json number -q '.[0].number' 2>/dev/null || true)
+          if [ -n "$EXISTING" ]; then
+            echo "Implementation PR already exists: #${EXISTING}. Skipping."
+            exit 0
+          fi
+
+          # Ensure we have latest main with the spec
+          git fetch origin main
+          git checkout main
+          git pull origin main
+
+          if [ ! -f "$SPEC_PATH" ]; then
+            echo "Spec not found at $SPEC_PATH. Was the spec PR merged?"
+            exit 1
+          fi
+
+          # Create implementation branch
+          git config user.name "kiln[bot]"
+          git config user.email "kiln[bot]@users.noreply.github.com"
+          git checkout -b "$BRANCH"
+
+          # Build protected paths list
+          PROTECTED_PATHS=$(yq '.protected_paths[]? // empty' .kiln/config.yml 2>/dev/null || echo -e ".github/\n.env\nCLAUDE.md\n.kiln/")
+          PROTECTED_LIST=$(echo "$PROTECTED_PATHS" | sed 's/^/- /')
+
+          export ISSUE_NUMBER ISSUE_TITLE SPEC_PATH PROTECTED_LIST
+          PROMPT=$(envsubst '$ISSUE_NUMBER $ISSUE_TITLE $SPEC_PATH $PROTECTED_LIST' < .kiln/prompts/implement.md)
+
+          echo "$PROMPT" | claude --dangerously-skip-permissions 2>claude_stderr.txt || {
+            gh issue comment "$ISSUE_NUMBER" --body "🔥 **Kiln** — Claude error: $(cat claude_stderr.txt)"
+            exit 1
+          }
+
+          # Push (Claude may have already pushed)
+          git push origin "$BRANCH" --force 2>/dev/null || true
+
+          # Create implementation PR
+          PR_BODY=$(printf '## Implementation for #%s\n\nSpec: `%s`\n\n*Fired in the Kiln*\n\n### Checklist\n- [ ] All acceptance criteria from spec are met\n- [ ] Tests passing\n- [ ] Lint passing\n- [ ] No changes outside spec scope\n\nCloses #%s' "$ISSUE_NUMBER" "$SPEC_PATH" "$ISSUE_NUMBER")
+
+          PR_URL=$(gh pr create \
+            --title "Kiln Impl: ${ISSUE_TITLE}" \
+            --body "$PR_BODY" \
+            --head "$BRANCH" \
+            --base main)
+
+          PR_NUM=$(echo "$PR_URL" | grep -oE '[0-9]+$')
+
+          # Label the PR
+          gh pr edit "$PR_NUM" --add-label "${PREFIX}:implementation,needs-review"
+
+          # Comment on the issue
+          gh issue comment "$ISSUE_NUMBER" --body "🔍 **Kiln** — Implementation PR ready: #${PR_NUM}"
+
+          # Transition label: implementing → in-review
+          gh issue edit "$ISSUE_NUMBER" --remove-label "${PREFIX}:implementing" 2>/dev/null || true
+          gh issue edit "$ISSUE_NUMBER" --add-label "${PREFIX}:in-review"
+
+  # ════════════════════════════════════════════════════════
+  # REVIEW — AI code review on implementation PRs
+  # ════════════════════════════════════════════════════════
+  review:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'pull_request'
+      && (github.event.action == 'opened' || github.event.action == 'synchronize')
+      && contains(toJSON(github.event.pull_request.labels.*.name), ':implementation')
+      && github.event.sender.type != 'Bot'
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.KILN_APP_ID }}
+          private-key: ${{ secrets.KILN_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Review PR
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          PR_BODY=$(gh pr view "$PR_NUMBER" --json body -q '.body // ""')
+
+          # Get file list and diff
+          FILE_LIST=$(gh pr view "$PR_NUMBER" --json files \
+            -q '.files[] | "\(.status // "modified"): \(.path) (+\(.additions) -\(.deletions))"')
+          PR_DIFF=$(gh pr diff "$PR_NUMBER" | head -c 50000)
+
+          # Find spec reference
+          ISSUE_NUM=$(echo "$PR_BODY" | grep -oP 'Closes #\K\d+' || true)
+          SPEC_REF=""
+          SPEC_REF_LINE=""
+          SPEC_CONTENT=""
+          SPEC_REVIEW_LINE=""
+
+          if [ -n "$ISSUE_NUM" ]; then
+            SPEC_REF="specs/issue-${ISSUE_NUM}.md"
+            if [ -f "$SPEC_REF" ]; then
+              SPEC_REF_LINE="**Spec:** ${SPEC_REF}"
+              SPEC_CONTENT="**Spec Content:**
+          $(cat "$SPEC_REF")"
+              SPEC_REVIEW_LINE="Review the implementation against the spec's acceptance criteria above."
+            fi
+          fi
+
+          export PR_NUMBER PR_TITLE FILE_LIST PR_DIFF SPEC_REF_LINE SPEC_CONTENT SPEC_REVIEW_LINE
+          PROMPT=$(envsubst '$PR_NUMBER $PR_TITLE $SPEC_REF_LINE $SPEC_CONTENT $FILE_LIST $PR_DIFF $SPEC_REVIEW_LINE' < .kiln/prompts/review.md)
+
+          RESULT=$(echo "$PROMPT" | claude --print --dangerously-skip-permissions 2>claude_stderr.txt) || {
+            gh pr comment "$PR_NUMBER" --body "🔥 **Kiln** — Claude error: $(cat claude_stderr.txt)"
+            exit 1
+          }
+
+          # Extract JSON
+          JSON=$(echo "$RESULT" | sed -n '/^```json$/,/^```$/p' | sed '1d;$d')
+          if [ -z "$JSON" ]; then
+            JSON=$(echo "$RESULT" | grep -Pzo '\{[\s\S]*\}' | tr '\0' '\n' || true)
+          fi
+
+          # If we can't parse JSON, post raw review
+          if [ -z "$JSON" ] || ! echo "$JSON" | jq . >/dev/null 2>&1; then
+            gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
+              -f event=COMMENT \
+              -f body="$(printf '🔥 **Kiln Review**\n\n%s' "$RESULT")"
+            exit 0
+          fi
+
+          VERDICT=$(echo "$JSON" | jq -r '.verdict // "approve"')
+          SUMMARY=$(echo "$JSON" | jq -r '.summary // "No summary."')
+          ISSUE_COUNT=$(echo "$JSON" | jq '.issues | length')
+          CRITICAL=$(echo "$JSON" | jq '[.issues[] | select(.severity == "critical")] | length')
+          MAJOR=$(echo "$JSON" | jq '[.issues[] | select(.severity == "major")] | length')
+          MINOR=$(echo "$JSON" | jq '[.issues[] | select(.severity == "minor")] | length')
+
+          if [ "$ISSUE_COUNT" -gt 0 ]; then
+            STATS="Found **${ISSUE_COUNT}** issue(s): ${CRITICAL} critical, ${MAJOR} major, ${MINOR} minor"
+          else
+            STATS="No issues found. ✅"
+          fi
+
+          REVIEW_BODY=$(printf '🔥 **Kiln Review**\n\n%s\n\n%s' "$SUMMARY" "$STATS")
+
+          # Map verdict to GitHub review event
+          if [ "$VERDICT" = "approve" ]; then
+            EVENT="APPROVE"
+          else
+            EVENT="REQUEST_CHANGES"
+          fi
+
+          # Try to submit review with inline comments
+          COMMENTS_JSON=$(echo "$JSON" | jq '[.issues[] | select(.file and .line) | {path: .file, line: .line, body: ("**\(.severity):** \(.comment)")}]')
+
+          if [ "$(echo "$COMMENTS_JSON" | jq 'length')" -gt 0 ]; then
+            # Submit with inline comments via API
+            gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
+              -f event="$EVENT" \
+              -f body="$REVIEW_BODY" \
+              --input <(echo "$COMMENTS_JSON" | jq '{comments: .}' | jq ". + {event: \"$EVENT\", body: $(echo "$REVIEW_BODY" | jq -Rs .)}") 2>/dev/null || {
+              # Fallback: summary-only review with issues listed in body
+              ISSUES_TEXT=$(echo "$JSON" | jq -r '.issues[] | "- **\(.severity)** `\(.file):\(.line)`: \(.comment)"')
+              gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
+                -f event="$EVENT" \
+                -f body="$(printf '%s\n\n%s' "$REVIEW_BODY" "$ISSUES_TEXT")"
+            }
+          else
+            gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
+              -f event="$EVENT" \
+              -f body="$REVIEW_BODY"
+          fi
+
+  # ════════════════════════════════════════════════════════
+  # FIX — address review feedback on implementation PRs
+  # ════════════════════════════════════════════════════════
+  fix:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'pull_request_review'
+      && github.event.review.state == 'changes_requested'
+      && contains(toJSON(github.event.pull_request.labels.*.name), ':implementation')
+      && github.event.sender.type != 'Bot'
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.KILN_APP_ID }}
+          private-key: ${{ secrets.KILN_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          token: ${{ steps.app-token.outputs.token }}
+          ref: ${{ github.event.pull_request.head.ref }}
+
+      - name: Install Claude Code CLI
+        run: npm install -g @anthropic-ai/claude-code
+
+      - name: Fix review feedback
+        env:
+          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PR_TITLE="${{ github.event.pull_request.title }}"
+          MAX_FIX=$(yq '.agents.fix.max_iterations // 3' .kiln/config.yml 2>/dev/null || echo "3")
+
+          # Count existing fix iterations from commit messages
+          FIX_COUNT=$(gh pr view "$PR_NUMBER" --json commits \
+            -q '[.commits[].messageHeadline | select(contains("kiln-fix"))] | length')
+
+          if [ "$FIX_COUNT" -ge "$MAX_FIX" ]; then
+            gh pr comment "$PR_NUMBER" \
+              --body "$(printf '⚠️ **Kiln** — Fix agent has reached the maximum of %s iterations. A human needs to step in.\n\ncc @%s' "$MAX_FIX" "${{ github.repository_owner }}")"
+            gh pr edit "$PR_NUMBER" --add-label "needs-human-review"
+            exit 0
+          fi
+
+          # Collect review feedback
+          FEEDBACK=""
+
+          # Get review summaries with changes_requested
+          REVIEWS=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
+            --jq '.[] | select(.state == "CHANGES_REQUESTED") | .body // empty')
+          if [ -n "$REVIEWS" ]; then
+            FEEDBACK=$(printf '%s\n\n**Review summaries:**\n%s' "$FEEDBACK" "$REVIEWS")
+          fi
+
+          # Get inline review comments
+          COMMENTS=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/comments" \
+            --jq '.[] | "**\(.path):\(.line // .original_line)** — \(.body)"')
+          if [ -n "$COMMENTS" ]; then
+            FEEDBACK=$(printf '%s\n\n**Inline comments:**\n%s' "$FEEDBACK" "$COMMENTS")
+          fi
+
+          FIX_ITERATION=$((FIX_COUNT + 1))
+
+          git config user.name "kiln[bot]"
+          git config user.email "kiln[bot]@users.noreply.github.com"
+
+          export PR_NUMBER PR_TITLE FEEDBACK FIX_ITERATION
+          PROMPT=$(envsubst '$PR_NUMBER $PR_TITLE $FEEDBACK $FIX_ITERATION' < .kiln/prompts/fix.md)
+
+          echo "$PROMPT" | claude --dangerously-skip-permissions 2>claude_stderr.txt || {
+            gh pr comment "$PR_NUMBER" --body "🔥 **Kiln** — Claude error: $(cat claude_stderr.txt)"
+            exit 1
+          }
+
+          # Push (Claude may have already pushed)
+          git push origin "${{ github.event.pull_request.head.ref }}" 2>/dev/null || true
+
+          # Reply to inline review comments
+          COMMENT_IDS=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/comments" --jq '.[].id')
+          for CID in $COMMENT_IDS; do
+            COMMENT_BODY=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/comments/${CID}" --jq '.body')
+            COMMENT_PATH=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/comments/${CID}" --jq '.path')
+            COMMENT_LINE=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/comments/${CID}" --jq '.line // .original_line')
+
+            REPLY_PROMPT="A code review comment was left on ${COMMENT_PATH}:${COMMENT_LINE}:
+
+          \"${COMMENT_BODY}\"
+
+          The fix agent has addressed this feedback. Write a brief, specific reply (1-3 sentences) explaining what was changed to address this comment. Be concrete about the fix, not vague. Do NOT use markdown code blocks. Just output the reply text directly."
+
+            REPLY=$(echo "$REPLY_PROMPT" | claude --print --dangerously-skip-permissions 2>/dev/null || echo "Addressed in latest push.")
+
+            gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/comments/${CID}/replies" \
+              -f body="$(printf '🔧 **Kiln** — %s' "$REPLY")" 2>/dev/null || true
+          done
+
+          gh pr comment "$PR_NUMBER" \
+            --body "$(printf '🔧 **Kiln** — Review feedback addressed (iteration %s/%s). Ready for re-review.' "$FIX_ITERATION" "$MAX_FIX")"
+
+  # ════════════════════════════════════════════════════════
+  # SHIP — merge approved implementation PRs when CI passes
+  # ════════════════════════════════════════════════════════
+  ship-on-approve:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'pull_request_review'
+      && github.event.review.state == 'approved'
+      && contains(toJSON(github.event.pull_request.labels.*.name), ':implementation')
+      && github.event.sender.type != 'Bot'
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.KILN_APP_ID }}
+          private-key: ${{ secrets.KILN_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Ship if CI green
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          PR_NUMBER="${{ github.event.pull_request.number }}"
+          PREFIX=$(yq '.labels.prefix // "kiln"' .kiln/config.yml 2>/dev/null || echo "kiln")
+          AUTO_MERGE=$(yq '.auto_merge // true' .kiln/config.yml 2>/dev/null || echo "true")
+
+          # Check CI status
+          HEAD_SHA="${{ github.event.pull_request.head.sha }}"
+          CI_STATUS=$(gh api "repos/${{ github.repository }}/commits/${HEAD_SHA}/check-runs" \
+            --jq '[.check_runs[] | select(.name != "Kiln") | .conclusion] | if all(. == "success" or . == "skipped") then "pass" else "pending" end' 2>/dev/null || echo "pending")
+
+          if [ "$CI_STATUS" != "pass" ]; then
+            echo "CI not yet green. Will ship when check_suite completes."
+            exit 0
+          fi
+
+          if [ "$AUTO_MERGE" != "true" ]; then
+            gh pr comment "$PR_NUMBER" \
+              --body "✅ **Kiln** — PR approved and CI green. Auto-merge is disabled — merge when ready."
+            exit 0
+          fi
+
+          # Merge
+          gh pr merge "$PR_NUMBER" --squash --delete-branch || {
+            echo "Merge failed for PR #${PR_NUMBER}"
+            exit 1
+          }
+
+          # Close linked issue
+          PR_BODY=$(gh pr view "$PR_NUMBER" --json body -q '.body // ""')
+          ISSUE_NUM=$(echo "$PR_BODY" | grep -oiP 'Closes #\K\d+' || true)
+          if [ -n "$ISSUE_NUM" ]; then
+            gh issue edit "$ISSUE_NUM" --remove-label "${PREFIX}:in-review" 2>/dev/null || true
+            gh issue edit "$ISSUE_NUM" --add-label "${PREFIX}:done"
+            gh issue close "$ISSUE_NUM"
+            gh issue comment "$ISSUE_NUM" \
+              --body "$(printf '🔥 **Kiln** — Shipped!\n\nImplementation merged via #%s.\n\n*Fired in the Kiln.*' "$PR_NUMBER")"
+          fi
+
+  ship-on-ci:
+    runs-on: ubuntu-latest
+    if: >-
+      github.event_name == 'check_suite'
+      && github.event.action == 'completed'
+    steps:
+      - name: Generate GitHub App token
+        id: app-token
+        uses: actions/create-github-app-token@v2
+        with:
+          app-id: ${{ secrets.KILN_APP_ID }}
+          private-key: ${{ secrets.KILN_APP_PRIVATE_KEY }}
+
+      - uses: actions/checkout@v4
+        with:
+          token: ${{ steps.app-token.outputs.token }}
+
+      - name: Ship if approved
+        env:
+          GH_TOKEN: ${{ steps.app-token.outputs.token }}
+        run: |
+          set -euo pipefail
+
+          PREFIX=$(yq '.labels.prefix // "kiln"' .kiln/config.yml 2>/dev/null || echo "kiln")
+          AUTO_MERGE=$(yq '.auto_merge // true' .kiln/config.yml 2>/dev/null || echo "true")
+
+          # Get associated PRs from check suite
+          PRS='${{ toJSON(github.event.check_suite.pull_requests.*.number) }}'
+          if [ "$PRS" = "[]" ] || [ -z "$PRS" ]; then
+            echo "No associated PRs. Skipping."
+            exit 0
+          fi
+
+          for PR_NUMBER in $(echo "$PRS" | jq -r '.[]'); do
+            # Check if this PR has the implementation label
+            LABELS=$(gh pr view "$PR_NUMBER" --json labels -q '.labels[].name' 2>/dev/null || true)
+            if ! echo "$LABELS" | grep -q ":implementation"; then
+              continue
+            fi
+
+            # Check if PR is approved
+            APPROVED=$(gh api "repos/${{ github.repository }}/pulls/${PR_NUMBER}/reviews" \
+              --jq '[.[] | select(.state == "APPROVED")] | length')
+            if [ "$APPROVED" -eq 0 ]; then
+              continue
+            fi
+
+            # Check all CI is green (except Kiln itself)
+            HEAD_SHA=$(gh pr view "$PR_NUMBER" --json headRefOid -q '.headRefOid')
+            CI_PASS=$(gh api "repos/${{ github.repository }}/commits/${HEAD_SHA}/check-runs" \
+              --jq '[.check_runs[] | select(.name != "Kiln") | .conclusion] | if all(. == "success" or . == "skipped") then "true" else "false" end' 2>/dev/null || echo "false")
+            if [ "$CI_PASS" != "true" ]; then
+              continue
+            fi
+
+            if [ "$AUTO_MERGE" != "true" ]; then
+              gh pr comment "$PR_NUMBER" \
+                --body "✅ **Kiln** — PR approved and CI green. Auto-merge is disabled — merge when ready."
+              continue
+            fi
+
+            # Ship it
+            gh pr merge "$PR_NUMBER" --squash --delete-branch || continue
+
+            # Close linked issue
+            PR_BODY=$(gh pr view "$PR_NUMBER" --json body -q '.body // ""' 2>/dev/null || true)
+            ISSUE_NUM=$(echo "$PR_BODY" | grep -oiP 'Closes #\K\d+' || true)
+            if [ -n "$ISSUE_NUM" ]; then
+              gh issue edit "$ISSUE_NUM" --remove-label "${PREFIX}:in-review" 2>/dev/null || true
+              gh issue edit "$ISSUE_NUM" --add-label "${PREFIX}:done"
+              gh issue close "$ISSUE_NUM"
+              gh issue comment "$ISSUE_NUM" \
+                --body "$(printf '🔥 **Kiln** — Shipped!\n\nImplementation merged via #%s.\n\n*Fired in the Kiln.*' "$PR_NUMBER")"
+            fi
+          done
