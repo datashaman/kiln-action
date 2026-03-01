@@ -42,6 +42,7 @@ async function extractResult(
 ): Promise<string> {
   const abortController = new AbortController();
   const timer = setTimeout(() => abortController.abort(), timeoutMs);
+  const stderrChunks: string[] = [];
 
   try {
     let resultMessage: SDKResultMessage | undefined;
@@ -49,11 +50,16 @@ async function extractResult(
     const stream = query({
       prompt,
       options: {
-        allowedTools: allowEdits ? EDIT_TOOLS : READ_ONLY_TOOLS,
+        tools: allowEdits ? EDIT_TOOLS : READ_ONLY_TOOLS,
         permissionMode: "bypassPermissions",
         allowDangerouslySkipPermissions: true,
+        persistSession: false,
         abortController,
         env: { ...process.env, ANTHROPIC_API_KEY: anthropicKey },
+        stderr: (data: string) => {
+          stderrChunks.push(data);
+          core.debug(`Claude SDK stderr: ${data}`);
+        },
       },
     });
 
@@ -64,12 +70,17 @@ async function extractResult(
     }
 
     if (!resultMessage) {
-      throw new Error("No result received from Claude Agent SDK");
+      const stderr = stderrChunks.join("");
+      throw new Error(
+        `No result received from Claude Agent SDK${stderr ? `\nstderr: ${stderr}` : ""}`,
+      );
     }
 
     if (resultMessage.subtype !== "success") {
       const errorResult = resultMessage as SDKResultMessage & { errors?: string[] };
-      throw new Error(errorResult.errors?.join("; ") || `Claude SDK error: ${resultMessage.subtype}`);
+      const stderr = stderrChunks.join("");
+      const baseMsg = errorResult.errors?.join("; ") || `Claude SDK error: ${resultMessage.subtype}`;
+      throw new Error(`${baseMsg}${stderr ? `\nstderr: ${stderr}` : ""}`);
     }
 
     return resultMessage.result.trim();

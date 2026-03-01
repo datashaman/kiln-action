@@ -147,7 +147,7 @@ describe("invokeClaude", () => {
         expect.objectContaining({
           prompt: "Review this code",
           options: expect.objectContaining({
-            allowedTools: ["Read", "Glob", "Grep"],
+            tools: ["Read", "Glob", "Grep"],
           }),
         }),
       );
@@ -164,7 +164,7 @@ describe("invokeClaude", () => {
       expect(mockedQuery).toHaveBeenCalledWith(
         expect.objectContaining({
           options: expect.objectContaining({
-            allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+            tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
           }),
         }),
       );
@@ -412,7 +412,7 @@ describe("runClaude", () => {
       expect.objectContaining({
         prompt: "test prompt",
         options: expect.objectContaining({
-          allowedTools: ["Read", "Glob", "Grep"],
+          tools: ["Read", "Glob", "Grep"],
         }),
       }),
     );
@@ -449,7 +449,7 @@ describe("runClaudeEdit", () => {
     expect(mockedQuery).toHaveBeenCalledWith(
       expect.objectContaining({
         options: expect.objectContaining({
-          allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+          tools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
         }),
       }),
     );
