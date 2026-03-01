@@ -17,6 +17,19 @@ export default async function implement(
 
   core.info(`🔥 Implement — Issue #${issueNum}: ${issue.title}`);
 
+  // AC5: If an implementation PR already exists for this issue, don't create a duplicate
+  const { data: existingPRs } = await octokit.rest.pulls.list({
+    ...context.repo,
+    head: `${context.repo.owner}:${branchName}`,
+    state: "open",
+  });
+  if (existingPRs.length > 0) {
+    core.info(
+      `🔥 Implement — Implementation PR already exists for issue #${issueNum}: #${existingPRs[0].number}. Skipping.`,
+    );
+    return { status: "skipped", reason: "duplicate", prNumber: existingPRs[0].number };
+  }
+
   execSync(
     "git fetch origin main && git checkout main && git pull origin main",
   );

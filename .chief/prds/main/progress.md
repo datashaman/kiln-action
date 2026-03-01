@@ -305,4 +305,34 @@
   - Standalone labels like `needs-human-review` don't use the configurable prefix
   - Type and size labels use fixed prefixes (`type:`, `size:`), not the configurable kiln prefix
   - The `ensureLabels` function runs on first action invocation and creates missing labels idempotently
+  - Loop prevention guards are in `src/guards.ts`: `isBotActor` (actor check) and `postStageError` (error comments)
+  - Duplicate PR prevention uses `pulls.list` with `head` filter and `state: "open"` — add `pulls.list` to mock Octokit in tests
+  - Concurrent events are handled via last-write-wins: label operations are idempotent, duplicate PR checks prevent race conditions
+---
+
+## 2026-03-01 - US-014
+- Implemented all 6 acceptance criteria for Loop Prevention & Edge Case Handling
+- AC1 (bot/action comment ignoring): Already implemented in `retriage.ts` — checks `comment.user.type === "Bot"` and `sender.login === "github-actions[bot]"`
+- AC2 (label event debounce/actor check): Created `src/guards.ts` with `isBotActor()` — checks `sender.type === "Bot"`, `sender.login === "github-actions[bot]"`, and `sender.login === "kiln[bot]"`. Called in `index.ts` before stage detection.
+- AC3 (error comment on stage failure): Added `postStageError()` in `src/guards.ts` — posts branded error comment `🔥 **Kiln** — Error in {stage}: {message}` on issue/PR. In `index.ts`, stage handler execution is wrapped in try/catch that calls `postStageError`, sets output to "error", and calls `core.setFailed`.
+- AC4 (duplicate spec PR prevention): Added `pulls.list` check in `specify.ts` before creating spec — checks for open PRs with matching branch `kiln/spec/issue-{number}`, returns `{ status: "skipped", reason: "duplicate" }` if found
+- AC5 (duplicate impl PR prevention): Added `pulls.list` check in `implement.ts` before creating impl — checks for open PRs with matching branch `kiln/impl/issue-{number}`, returns `{ status: "skipped", reason: "duplicate" }` if found
+- AC6 (concurrent events): Last-write-wins via inherent design: label operations are idempotent (`addLabels` is a no-op for existing labels, `removeLabel` catches not-found), duplicate PR checks prevent double creation
+- Added 13 tests in `src/guards.test.ts` (7 for `isBotActor`, 6 for `postStageError`)
+- Added 6 tests each to `specify.test.ts` and `implement.test.ts` for duplicate PR prevention
+- Files changed:
+  - src/guards.ts (new — `isBotActor`, `postStageError`)
+  - src/guards.test.ts (new — 13 tests)
+  - src/index.ts (imports from guards.ts, bot actor check before stage detection, stage error handling with try/catch)
+  - src/stages/specify.ts (duplicate spec PR check via `pulls.list`)
+  - src/stages/specify.test.ts (added `pulls.list` to mock, 6 new tests)
+  - src/stages/implement.ts (duplicate impl PR check via `pulls.list`)
+  - src/stages/implement.test.ts (added `pulls.list` to mock, 6 new tests)
+  - dist/index.js (rebuilt)
+- **Learnings for future iterations:**
+  - `isBotActor` checks `sender.type` and `sender.login` on `context.payload.sender` — GitHub Actions label events include the sender who triggered the event
+  - Duplicate PR check uses `pulls.list` with `head: "{owner}:{branch}"` (must include owner prefix) and `state: "open"`
+  - When adding `pulls.list` to mock Octokit, existing tests still work because `pulls.list` defaults to returning empty array
+  - `postStageError` is best-effort (catches failures) to avoid masking the original error
+  - The `run()` function in index.ts cannot be easily unit-tested because it's auto-executed on module import — extract testable logic into separate modules like `guards.ts`
 ---

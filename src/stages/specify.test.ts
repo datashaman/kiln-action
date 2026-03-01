@@ -40,6 +40,7 @@ function makeOctokit(): Octokit {
         create: jest.fn().mockResolvedValue({
           data: { number: 10 },
         }),
+        list: jest.fn().mockResolvedValue({ data: [] }),
       },
       issues: {
         createComment: jest.fn().mockResolvedValue({}),
@@ -492,6 +493,79 @@ describe("specify", () => {
           body: expect.stringContaining("review"),
         }),
       );
+    });
+  });
+
+  // ── AC4: Duplicate spec PR prevention ──
+  describe("duplicate spec PR prevention", () => {
+    it("skips if a spec PR already exists for the issue", async () => {
+      const ctx = makeCtx();
+      (ctx.octokit.rest.pulls.list as unknown as jest.Mock).mockResolvedValue({
+        data: [{ number: 99 }],
+      });
+
+      const result = await specify(ctx);
+
+      expect(result.status).toBe("skipped");
+      expect(result.reason).toBe("duplicate");
+      expect(result.prNumber).toBe(99);
+    });
+
+    it("does not invoke Claude when duplicate exists", async () => {
+      const ctx = makeCtx();
+      (ctx.octokit.rest.pulls.list as unknown as jest.Mock).mockResolvedValue({
+        data: [{ number: 99 }],
+      });
+
+      await specify(ctx);
+
+      expect(mockedRunClaudeEdit).not.toHaveBeenCalled();
+    });
+
+    it("does not create a new PR when duplicate exists", async () => {
+      const ctx = makeCtx();
+      (ctx.octokit.rest.pulls.list as unknown as jest.Mock).mockResolvedValue({
+        data: [{ number: 99 }],
+      });
+
+      await specify(ctx);
+
+      expect(ctx.octokit.rest.pulls.create).not.toHaveBeenCalled();
+    });
+
+    it("checks for open PRs with the correct branch name", async () => {
+      const ctx = makeCtx();
+      await specify(ctx);
+
+      expect(ctx.octokit.rest.pulls.list).toHaveBeenCalledWith(
+        expect.objectContaining({
+          owner: "test-owner",
+          repo: "test-repo",
+          head: "test-owner:kiln/spec/issue-5",
+          state: "open",
+        }),
+      );
+    });
+
+    it("logs a message when skipping due to duplicate", async () => {
+      const ctx = makeCtx();
+      (ctx.octokit.rest.pulls.list as unknown as jest.Mock).mockResolvedValue({
+        data: [{ number: 99 }],
+      });
+
+      await specify(ctx);
+
+      expect(core.info).toHaveBeenCalledWith(
+        expect.stringContaining("Spec PR already exists"),
+      );
+    });
+
+    it("proceeds normally when no duplicate exists", async () => {
+      const ctx = makeCtx();
+      const result = await specify(ctx);
+
+      expect(result.status).toBe("success");
+      expect(mockedRunClaudeEdit).toHaveBeenCalled();
     });
   });
 

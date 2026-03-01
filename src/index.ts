@@ -2,6 +2,7 @@ import * as core from "@actions/core";
 import * as github from "@actions/github";
 import { checkBlocked } from "./blocked";
 import { loadConfig } from "./config";
+import { isBotActor, postStageError } from "./guards";
 import { ensureLabels } from "./labels";
 import { detectStage } from "./router";
 import { KilnContext, StageResult } from "./types";
@@ -43,6 +44,16 @@ async function run(): Promise<void> {
 
     await ensureLabels(octokit, context, config);
 
+    // AC2: Label events triggered by Kiln itself don't cause duplicate stage runs
+    if (isBotActor(context)) {
+      core.info(
+        `🔥 Kiln — Skipping: event triggered by bot (${(context.payload.sender as { login?: string })?.login})`,
+      );
+      core.setOutput("stage", "none");
+      core.setOutput("result", "skipped");
+      return;
+    }
+
     if (await checkBlocked(octokit, context, config)) {
       core.info("🛑 Kiln is blocked on this issue. Skipping.");
       core.setOutput("stage", "none");
@@ -82,7 +93,20 @@ async function run(): Promise<void> {
       token,
     };
 
-    const result = await handler(ctx);
+    // AC3: Stage failures post error comment and don't advance pipeline
+    let result: StageResult;
+    try {
+      result = await handler(ctx);
+    } catch (stageError) {
+      const errorMsg =
+        stageError instanceof Error ? stageError.message : String(stageError);
+      core.error(`🔥 Kiln — Stage "${stage}" failed: ${errorMsg}`);
+      await postStageError(octokit, context, stage, errorMsg);
+      core.setOutput("stage", stage);
+      core.setOutput("result", "error");
+      core.setFailed(`🔥 Kiln — Stage "${stage}" failed: ${errorMsg}`);
+      return;
+    }
 
     core.setOutput("stage", stage);
     core.setOutput("result", result?.status || "success");

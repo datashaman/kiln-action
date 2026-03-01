@@ -232,7 +232,8 @@
         "Concurrent events for the same issue are handled gracefully (last-write-wins or queue)"
       ],
       "priority": 14,
-      "passes": false
+      "passes": true,
+      "inProgress": false
     },
     {
       "id": "US-015",

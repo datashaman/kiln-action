@@ -66,6 +66,19 @@ export default async function specify(
 
   core.info(`🔥 Specify — Issue #${issueNum}: ${issue.title}`);
 
+  // AC4: If a spec PR already exists for this issue, don't create a duplicate
+  const { data: existingPRs } = await octokit.rest.pulls.list({
+    ...context.repo,
+    head: `${context.repo.owner}:${branchName}`,
+    state: "open",
+  });
+  if (existingPRs.length > 0) {
+    core.info(
+      `🔥 Specify — Spec PR already exists for issue #${issueNum}: #${existingPRs[0].number}. Skipping.`,
+    );
+    return { status: "skipped", reason: "duplicate", prNumber: existingPRs[0].number };
+  }
+
   execSync('git config user.name "kiln[bot]"');
   execSync('git config user.email "kiln[bot]@users.noreply.github.com"');
   execSync(`git checkout -b ${branchName}`);

@@ -36,6 +36,7 @@ function makeOctokit(): Octokit {
         create: jest.fn().mockResolvedValue({
           data: { number: 20 },
         }),
+        list: jest.fn().mockResolvedValue({ data: [] }),
       },
       issues: {
         createComment: jest.fn().mockResolvedValue({}),
@@ -439,6 +440,79 @@ describe("implement", () => {
           body: expect.stringContaining("**Kiln**"),
         }),
       );
+    });
+  });
+
+  // ── AC5: Duplicate implementation PR prevention ──
+  describe("duplicate implementation PR prevention", () => {
+    it("skips if an implementation PR already exists for the issue", async () => {
+      const ctx = makeCtx();
+      (ctx.octokit.rest.pulls.list as unknown as jest.Mock).mockResolvedValue({
+        data: [{ number: 55 }],
+      });
+
+      const result = await implement(ctx);
+
+      expect(result.status).toBe("skipped");
+      expect(result.reason).toBe("duplicate");
+      expect(result.prNumber).toBe(55);
+    });
+
+    it("does not invoke Claude when duplicate exists", async () => {
+      const ctx = makeCtx();
+      (ctx.octokit.rest.pulls.list as unknown as jest.Mock).mockResolvedValue({
+        data: [{ number: 55 }],
+      });
+
+      await implement(ctx);
+
+      expect(mockedRunClaudeEdit).not.toHaveBeenCalled();
+    });
+
+    it("does not create a new PR when duplicate exists", async () => {
+      const ctx = makeCtx();
+      (ctx.octokit.rest.pulls.list as unknown as jest.Mock).mockResolvedValue({
+        data: [{ number: 55 }],
+      });
+
+      await implement(ctx);
+
+      expect(ctx.octokit.rest.pulls.create).not.toHaveBeenCalled();
+    });
+
+    it("checks for open PRs with the correct branch name", async () => {
+      const ctx = makeCtx();
+      await implement(ctx);
+
+      expect(ctx.octokit.rest.pulls.list).toHaveBeenCalledWith(
+        expect.objectContaining({
+          owner: "test-owner",
+          repo: "test-repo",
+          head: "test-owner:kiln/impl/issue-5",
+          state: "open",
+        }),
+      );
+    });
+
+    it("logs a message when skipping due to duplicate", async () => {
+      const ctx = makeCtx();
+      (ctx.octokit.rest.pulls.list as unknown as jest.Mock).mockResolvedValue({
+        data: [{ number: 55 }],
+      });
+
+      await implement(ctx);
+
+      expect(core.info).toHaveBeenCalledWith(
+        expect.stringContaining("Implementation PR already exists"),
+      );
+    });
+
+    it("proceeds normally when no duplicate exists", async () => {
+      const ctx = makeCtx();
+      const result = await implement(ctx);
+
+      expect(result.status).toBe("success");
+      expect(mockedRunClaudeEdit).toHaveBeenCalled();
     });
   });
 

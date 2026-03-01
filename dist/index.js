@@ -360,6 +360,84 @@ function deepMerge(target, source) {
 
 /***/ }),
 
+/***/ 4008:
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+
+"use strict";
+
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.isBotActor = isBotActor;
+exports.postStageError = postStageError;
+const core = __importStar(__nccwpck_require__(7484));
+/**
+ * Check if the event was triggered by a bot or GitHub Actions itself.
+ * Prevents infinite loops where Kiln's own label changes re-trigger stages.
+ */
+function isBotActor(context) {
+    const sender = context.payload.sender;
+    if (!sender)
+        return false;
+    return (sender.type === "Bot" ||
+        sender.login === "github-actions[bot]" ||
+        sender.login === "kiln[bot]");
+}
+/**
+ * Post a branded error comment on the relevant issue or PR.
+ * Best-effort — failures are logged but not thrown.
+ */
+async function postStageError(octokit, context, stage, message) {
+    const issueNumber = context.payload.issue?.number ??
+        context.payload.pull_request?.number;
+    if (!issueNumber)
+        return;
+    try {
+        await octokit.rest.issues.createComment({
+            ...context.repo,
+            issue_number: issueNumber,
+            body: `🔥 **Kiln** — Error in ${stage}: ${message}`,
+        });
+    }
+    catch {
+        core.warning("Failed to post stage error comment");
+    }
+}
+//# sourceMappingURL=guards.js.map
+
+/***/ }),
+
 /***/ 1188:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -406,6 +484,7 @@ const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
 const blocked_1 = __nccwpck_require__(9804);
 const config_1 = __nccwpck_require__(6472);
+const guards_1 = __nccwpck_require__(4008);
 const labels_1 = __nccwpck_require__(4097);
 const router_1 = __nccwpck_require__(7039);
 const triage_1 = __importDefault(__nccwpck_require__(2084));
@@ -437,6 +516,13 @@ async function run() {
         const context = github.context;
         const config = await (0, config_1.loadConfig)(configPath);
         await (0, labels_1.ensureLabels)(octokit, context, config);
+        // AC2: Label events triggered by Kiln itself don't cause duplicate stage runs
+        if ((0, guards_1.isBotActor)(context)) {
+            core.info(`🔥 Kiln — Skipping: event triggered by bot (${context.payload.sender?.login})`);
+            core.setOutput("stage", "none");
+            core.setOutput("result", "skipped");
+            return;
+        }
         if (await (0, blocked_1.checkBlocked)(octokit, context, config)) {
             core.info("🛑 Kiln is blocked on this issue. Skipping.");
             core.setOutput("stage", "none");
@@ -470,7 +556,20 @@ async function run() {
             timeoutMinutes,
             token,
         };
-        const result = await handler(ctx);
+        // AC3: Stage failures post error comment and don't advance pipeline
+        let result;
+        try {
+            result = await handler(ctx);
+        }
+        catch (stageError) {
+            const errorMsg = stageError instanceof Error ? stageError.message : String(stageError);
+            core.error(`🔥 Kiln — Stage "${stage}" failed: ${errorMsg}`);
+            await (0, guards_1.postStageError)(octokit, context, stage, errorMsg);
+            core.setOutput("stage", stage);
+            core.setOutput("result", "error");
+            core.setFailed(`🔥 Kiln — Stage "${stage}" failed: ${errorMsg}`);
+            return;
+        }
         core.setOutput("stage", stage);
         core.setOutput("result", result?.status || "success");
         if (result?.prNumber) {
@@ -1172,6 +1271,16 @@ async function implement(ctx) {
     const branchName = `kiln/impl/issue-${issueNum}`;
     const specPath = `specs/issue-${issueNum}.md`;
     core.info(`🔥 Implement — Issue #${issueNum}: ${issue.title}`);
+    // AC5: If an implementation PR already exists for this issue, don't create a duplicate
+    const { data: existingPRs } = await octokit.rest.pulls.list({
+        ...context.repo,
+        head: `${context.repo.owner}:${branchName}`,
+        state: "open",
+    });
+    if (existingPRs.length > 0) {
+        core.info(`🔥 Implement — Implementation PR already exists for issue #${issueNum}: #${existingPRs[0].number}. Skipping.`);
+        return { status: "skipped", reason: "duplicate", prNumber: existingPRs[0].number };
+    }
     (0, child_process_1.execSync)("git fetch origin main && git checkout main && git pull origin main");
     if (!fs.existsSync(specPath)) {
         core.setFailed(`Spec not found at ${specPath}. Was the spec PR merged?`);
@@ -1808,6 +1917,16 @@ async function specify(ctx) {
     const issueNum = issue.number;
     const branchName = `kiln/spec/issue-${issueNum}`;
     core.info(`🔥 Specify — Issue #${issueNum}: ${issue.title}`);
+    // AC4: If a spec PR already exists for this issue, don't create a duplicate
+    const { data: existingPRs } = await octokit.rest.pulls.list({
+        ...context.repo,
+        head: `${context.repo.owner}:${branchName}`,
+        state: "open",
+    });
+    if (existingPRs.length > 0) {
+        core.info(`🔥 Specify — Spec PR already exists for issue #${issueNum}: #${existingPRs[0].number}. Skipping.`);
+        return { status: "skipped", reason: "duplicate", prNumber: existingPRs[0].number };
+    }
     (0, child_process_1.execSync)('git config user.name "kiln[bot]"');
     (0, child_process_1.execSync)('git config user.email "kiln[bot]@users.noreply.github.com"');
     (0, child_process_1.execSync)(`git checkout -b ${branchName}`);
