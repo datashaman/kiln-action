@@ -1,6 +1,73 @@
 /******/ (() => { // webpackBootstrap
 /******/ 	var __webpack_modules__ = ({
 
+/***/ 9804:
+/***/ ((__unused_webpack_module, exports) => {
+
+"use strict";
+
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.checkBlocked = checkBlocked;
+const BLOCKED_COMMENT = "🔥 **Kiln** — Automation is blocked on this item. Remove kiln:blocked to resume.";
+async function checkBlocked(octokit, context, config) {
+    const prefix = config.labels?.prefix || "kiln";
+    const blockedLabel = `${prefix}:blocked`;
+    const hasLabel = (labels) => !!labels?.some((l) => (typeof l === "string" ? l : l.name) === blockedLabel);
+    // For PR events, check both PR labels and linked issue labels
+    if (context.payload.pull_request) {
+        const prLabels = context.payload.pull_request.labels;
+        const prNumber = context.payload.pull_request.number;
+        if (hasLabel(prLabels)) {
+            await postBlockedComment(octokit, context, prNumber);
+            return true;
+        }
+        // Also check the linked issue
+        const match = context.payload.pull_request.body?.match(/Closes #(\d+)/i);
+        if (match) {
+            const issueNumber = parseInt(match[1], 10);
+            try {
+                const { data: issue } = await octokit.rest.issues.get({
+                    ...context.repo,
+                    issue_number: issueNumber,
+                });
+                if (hasLabel(issue.labels)) {
+                    await postBlockedComment(octokit, context, prNumber);
+                    return true;
+                }
+            }
+            catch {
+                // Issue not found or inaccessible — not blocked
+            }
+        }
+        return false;
+    }
+    // For issue events, check the issue labels
+    const issueNumber = context.payload.issue?.number;
+    if (!issueNumber)
+        return false;
+    const issueLabels = context.payload.issue?.labels;
+    if (hasLabel(issueLabels)) {
+        await postBlockedComment(octokit, context, issueNumber);
+        return true;
+    }
+    return false;
+}
+async function postBlockedComment(octokit, context, issueOrPrNumber) {
+    try {
+        await octokit.rest.issues.createComment({
+            ...context.repo,
+            issue_number: issueOrPrNumber,
+            body: BLOCKED_COMMENT,
+        });
+    }
+    catch {
+        // Best-effort comment; don't fail the guard if comment posting fails
+    }
+}
+//# sourceMappingURL=blocked.js.map
+
+/***/ }),
+
 /***/ 5144:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
@@ -238,6 +305,7 @@ var __importDefault = (this && this.__importDefault) || function (mod) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 const core = __importStar(__nccwpck_require__(7484));
 const github = __importStar(__nccwpck_require__(3228));
+const blocked_1 = __nccwpck_require__(9804);
 const config_1 = __nccwpck_require__(6472);
 const labels_1 = __nccwpck_require__(4097);
 const router_1 = __nccwpck_require__(7039);
@@ -258,28 +326,6 @@ const STAGES = {
     fix: fix_1.default,
     release: ship_1.default,
 };
-async function isBlocked(octokit, context, config) {
-    const prefix = config.labels?.prefix || "kiln";
-    const blockedLabel = `${prefix}:blocked`;
-    let issueNumber = context.payload.issue?.number;
-    if (!issueNumber && context.payload.pull_request) {
-        const match = context.payload.pull_request.body?.match(/Closes #(\d+)/);
-        if (match)
-            issueNumber = parseInt(match[1], 10);
-    }
-    if (!issueNumber)
-        return false;
-    try {
-        const { data: issue } = await octokit.rest.issues.get({
-            ...context.repo,
-            issue_number: issueNumber,
-        });
-        return issue.labels.some((l) => (typeof l === "string" ? l : l.name) === blockedLabel);
-    }
-    catch {
-        return false;
-    }
-}
 async function run() {
     try {
         const token = core.getInput("github_token");
@@ -291,7 +337,7 @@ async function run() {
         const context = github.context;
         const config = await (0, config_1.loadConfig)(configPath);
         await (0, labels_1.ensureLabels)(octokit, context, config);
-        if (await isBlocked(octokit, context, config)) {
+        if (await (0, blocked_1.checkBlocked)(octokit, context, config)) {
             core.info("🛑 Kiln is blocked on this issue. Skipping.");
             core.setOutput("stage", "none");
             core.setOutput("result", "blocked");

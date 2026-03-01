@@ -1,5 +1,6 @@
 import * as core from "@actions/core";
 import * as github from "@actions/github";
+import { checkBlocked } from "./blocked";
 import { loadConfig } from "./config";
 import { ensureLabels } from "./labels";
 import { detectStage } from "./router";
@@ -26,37 +27,6 @@ const STAGES: Record<string, StageHandler> = {
   release: ship,
 };
 
-async function isBlocked(
-  octokit: KilnContext["octokit"],
-  context: KilnContext["context"],
-  config: KilnContext["config"],
-): Promise<boolean> {
-  const prefix = config.labels?.prefix || "kiln";
-  const blockedLabel = `${prefix}:blocked`;
-
-  let issueNumber = context.payload.issue?.number as number | undefined;
-  if (!issueNumber && context.payload.pull_request) {
-    const match = (
-      context.payload.pull_request.body as string | undefined
-    )?.match(/Closes #(\d+)/);
-    if (match) issueNumber = parseInt(match[1], 10);
-  }
-
-  if (!issueNumber) return false;
-
-  try {
-    const { data: issue } = await octokit.rest.issues.get({
-      ...context.repo,
-      issue_number: issueNumber,
-    });
-    return issue.labels.some(
-      (l) => (typeof l === "string" ? l : l.name) === blockedLabel,
-    );
-  } catch {
-    return false;
-  }
-}
-
 async function run(): Promise<void> {
   try {
     const token = core.getInput("github_token");
@@ -72,7 +42,7 @@ async function run(): Promise<void> {
 
     await ensureLabels(octokit, context, config);
 
-    if (await isBlocked(octokit, context, config)) {
+    if (await checkBlocked(octokit, context, config)) {
       core.info("🛑 Kiln is blocked on this issue. Skipping.");
       core.setOutput("stage", "none");
       core.setOutput("result", "blocked");

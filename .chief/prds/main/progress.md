@@ -11,6 +11,8 @@
 - Stage name mapping in index.ts: `re-triage` → triage handler, `release` → ship handler
 - `action.yml` uses `node24` runtime
 - Only `anthropic_api_key` is a required input; others have defaults
+- Blocked guard in `src/blocked.ts` runs before stage detection; checks `{prefix}:blocked` label on issues and PRs
+- For PR events, blocked guard checks both PR labels and linked issue labels (via `Closes #N` in PR body)
 
 ## 2026-03-01 - US-001
 - Converted project from JavaScript to TypeScript
@@ -61,4 +63,25 @@
   - Mock `@actions/core` with `jest.mock` to test logging calls
   - Create `makeContext` helper to build minimal `Context` objects for router tests
   - The router's `extractLabels` helper safely handles missing/undefined label arrays
+---
+
+## 2026-03-01 - US-003
+- Extracted blocked guard into dedicated `src/blocked.ts` module (was inline in index.ts)
+- `checkBlocked` checks issue labels (from payload) for `kiln:blocked` label
+- For PR events, checks both PR labels AND linked issue labels (via `Closes #N` in PR body)
+- Posts branded comment when blocked: "🔥 **Kiln** — Automation is blocked on this item. Remove kiln:blocked to resume."
+- Exits cleanly (exit code 0) without running the stage when blocked
+- Supports custom label prefix from config
+- Comment posting is best-effort (catches errors to avoid failing the guard)
+- Files changed:
+  - src/blocked.ts (new - extracted blocked guard logic)
+  - src/blocked.test.ts (new - 26 tests covering all AC)
+  - src/index.ts (imports `checkBlocked` from blocked.ts, removed inline `isBlocked`)
+  - dist/index.js (rebuilt)
+- **Learnings for future iterations:**
+  - Extract testable logic into separate modules rather than keeping it inline in index.ts
+  - Mock Octokit with `jest.fn().mockResolvedValue({})` for issues.createComment and issues.get
+  - Use `as unknown as jest.Mock` when casting Octokit methods that TypeScript can't bridge to Mock type
+  - PR body parsing uses `Closes #(\d+)` (case-insensitive) to find linked issue number
+  - The blocked guard runs before stage detection in the pipeline — it's a pre-router check
 ---

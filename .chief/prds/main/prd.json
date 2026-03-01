@@ -42,7 +42,7 @@
         "For PR events, Kiln checks both the PR labels and the linked issue labels for kiln:blocked"
       ],
       "priority": 3,
-      "passes": false
+      "passes": true
     },
     {
       "id": "US-004",
