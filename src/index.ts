@@ -17,12 +17,13 @@ type StageHandler = (ctx: KilnContext) => Promise<StageResult>;
 
 const STAGES: Record<string, StageHandler> = {
   triage,
+  "re-triage": triage,
   specify,
   "approve-spec": approveSpec,
   implement,
   review,
   fix,
-  ship,
+  release: ship,
 };
 
 async function isBlocked(
@@ -78,10 +79,16 @@ async function run(): Promise<void> {
       return;
     }
 
-    const stage = forceStage !== "auto" ? forceStage : detectStage(context);
+    let stage: string | null;
+
+    if (forceStage !== "auto") {
+      stage = forceStage;
+    } else {
+      const route = detectStage(context);
+      stage = route?.stage ?? null;
+    }
 
     if (!stage) {
-      core.info("🔥 Kiln — No matching stage for this event. Skipping.");
       core.setOutput("stage", "none");
       core.setOutput("result", "skipped");
       return;

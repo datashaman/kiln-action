@@ -250,12 +250,13 @@ const fix_1 = __importDefault(__nccwpck_require__(3281));
 const ship_1 = __importDefault(__nccwpck_require__(8058));
 const STAGES = {
     triage: triage_1.default,
+    "re-triage": triage_1.default,
     specify: specify_1.default,
     "approve-spec": approve_spec_1.default,
     implement: implement_1.default,
     review: review_1.default,
     fix: fix_1.default,
-    ship: ship_1.default,
+    release: ship_1.default,
 };
 async function isBlocked(octokit, context, config) {
     const prefix = config.labels?.prefix || "kiln";
@@ -296,9 +297,15 @@ async function run() {
             core.setOutput("result", "blocked");
             return;
         }
-        const stage = forceStage !== "auto" ? forceStage : (0, router_1.detectStage)(context);
+        let stage;
+        if (forceStage !== "auto") {
+            stage = forceStage;
+        }
+        else {
+            const route = (0, router_1.detectStage)(context);
+            stage = route?.stage ?? null;
+        }
         if (!stage) {
-            core.info("🔥 Kiln — No matching stage for this event. Skipping.");
             core.setOutput("stage", "none");
             core.setOutput("result", "skipped");
             return;
@@ -467,91 +474,198 @@ async function transitionLabel(octokit, context, issueNumber, fromSuffix, toSuff
 /***/ }),
 
 /***/ 7039:
-/***/ ((__unused_webpack_module, exports) => {
+/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
 
+var __createBinding = (this && this.__createBinding) || (Object.create ? (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    var desc = Object.getOwnPropertyDescriptor(m, k);
+    if (!desc || ("get" in desc ? !m.__esModule : desc.writable || desc.configurable)) {
+      desc = { enumerable: true, get: function() { return m[k]; } };
+    }
+    Object.defineProperty(o, k2, desc);
+}) : (function(o, m, k, k2) {
+    if (k2 === undefined) k2 = k;
+    o[k2] = m[k];
+}));
+var __setModuleDefault = (this && this.__setModuleDefault) || (Object.create ? (function(o, v) {
+    Object.defineProperty(o, "default", { enumerable: true, value: v });
+}) : function(o, v) {
+    o["default"] = v;
+});
+var __importStar = (this && this.__importStar) || (function () {
+    var ownKeys = function(o) {
+        ownKeys = Object.getOwnPropertyNames || function (o) {
+            var ar = [];
+            for (var k in o) if (Object.prototype.hasOwnProperty.call(o, k)) ar[ar.length] = k;
+            return ar;
+        };
+        return ownKeys(o);
+    };
+    return function (mod) {
+        if (mod && mod.__esModule) return mod;
+        var result = {};
+        if (mod != null) for (var k = ownKeys(mod), i = 0; i < k.length; i++) if (k[i] !== "default") __createBinding(result, mod, k[i]);
+        __setModuleDefault(result, mod);
+        return result;
+    };
+})();
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.detectStage = detectStage;
+const core = __importStar(__nccwpck_require__(7484));
 /**
  * Detects which Kiln stage to run based on the GitHub event.
  *
  * Event → Stage mapping:
  *
  *   issues.opened                                        → triage
+ *   issue_comment.created (kiln:intake or kiln:needs-info) → re-triage
  *   issues.labeled  (kiln:specifying)                    → specify
  *   pull_request_review.submitted (approved + spec PR)   → approve-spec
  *   issues.labeled  (kiln:implementing)                  → implement
- *   pull_request.opened (impl PR)                        → review
- *   pull_request_review.submitted (changes_requested)    → fix
- *   pull_request_review.submitted (approved + impl PR)   → ship
- *   check_suite.completed (impl PR, all green)           → ship
+ *   pull_request.opened / synchronize (impl PR)          → review
+ *   pull_request_review.submitted (changes_requested + impl PR) → fix
+ *   pull_request_review.submitted (approved + impl PR)   → release
+ *   check_suite.completed (impl PR)                      → release
  */
 function detectStage(context) {
     const { eventName, payload } = context;
     // ── Issue Events ──────────────────────────────────────
     if (eventName === "issues") {
+        const issueNumber = payload.issue?.number;
+        const issueLabels = extractLabels(payload.issue?.labels);
         // New issue opened → triage
         if (payload.action === "opened") {
-            return "triage";
+            const result = {
+                stage: "triage",
+                issueNumber,
+                labels: issueLabels,
+                payload: payload,
+            };
+            core.info(`🔥 Kiln Router — Matched stage: triage (issues.opened)`);
+            return result;
         }
         // Labeled events — check which label was just added
         if (payload.action === "labeled") {
             const added = payload.label?.name;
-            if (added?.endsWith(":specifying"))
-                return "specify";
-            if (added?.endsWith(":implementing"))
-                return "implement";
+            if (added?.endsWith(":specifying")) {
+                const result = {
+                    stage: "specify",
+                    issueNumber,
+                    labels: issueLabels,
+                    payload: payload,
+                };
+                core.info(`🔥 Kiln Router — Matched stage: specify (issues.labeled with ${added})`);
+                return result;
+            }
+            if (added?.endsWith(":implementing")) {
+                const result = {
+                    stage: "implement",
+                    issueNumber,
+                    labels: issueLabels,
+                    payload: payload,
+                };
+                core.info(`🔥 Kiln Router — Matched stage: implement (issues.labeled with ${added})`);
+                return result;
+            }
         }
     }
     // ── Issue Comment Events ──────────────────────────────
     if (eventName === "issue_comment") {
         if (payload.action === "created") {
-            const labels = payload.issue?.labels || [];
-            const labelNames = labels.map((l) => l.name);
-            if (labelNames.some((n) => n.endsWith(":intake") || n.endsWith(":needs-info"))) {
-                return "triage";
+            const issueNumber = payload.issue?.number;
+            const issueLabels = extractLabels(payload.issue?.labels);
+            if (issueLabels.some((n) => n.endsWith(":intake") || n.endsWith(":needs-info"))) {
+                const result = {
+                    stage: "re-triage",
+                    issueNumber,
+                    labels: issueLabels,
+                    payload: payload,
+                };
+                core.info(`🔥 Kiln Router — Matched stage: re-triage (issue_comment.created on issue with intake/needs-info label)`);
+                return result;
             }
         }
     }
     // ── Pull Request Events ───────────────────────────────
     if (eventName === "pull_request") {
-        const labels = payload.pull_request?.labels || [];
-        const labelNames = labels.map((l) => l.name);
+        const prNumber = payload.pull_request?.number;
+        const prLabels = extractLabels(payload.pull_request?.labels);
         // Impl PR opened or updated → review
         if ((payload.action === "opened" || payload.action === "synchronize") &&
-            labelNames.some((l) => l.endsWith(":implementation"))) {
-            return "review";
+            prLabels.some((l) => l.endsWith(":implementation"))) {
+            const result = {
+                stage: "review",
+                prNumber,
+                labels: prLabels,
+                payload: payload,
+            };
+            core.info(`🔥 Kiln Router — Matched stage: review (pull_request.${payload.action} with implementation label)`);
+            return result;
         }
     }
     // ── PR Review Events ──────────────────────────────────
     if (eventName === "pull_request_review") {
-        const labels = payload.pull_request?.labels || [];
-        const labelNames = labels.map((l) => l.name);
+        const prNumber = payload.pull_request?.number;
+        const prLabels = extractLabels(payload.pull_request?.labels);
         const state = payload.review?.state;
         // Spec PR approved → approve-spec (triggers implementation)
-        if (state === "approved" && labelNames.some((l) => l.endsWith(":spec"))) {
-            return "approve-spec";
+        if (state === "approved" && prLabels.some((l) => l.endsWith(":spec"))) {
+            const result = {
+                stage: "approve-spec",
+                prNumber,
+                labels: prLabels,
+                payload: payload,
+            };
+            core.info(`🔥 Kiln Router — Matched stage: approve-spec (pull_request_review.submitted approved on spec PR)`);
+            return result;
         }
         // Impl PR: changes requested → fix
         if (state === "changes_requested" &&
-            labelNames.some((l) => l.endsWith(":implementation"))) {
-            return "fix";
+            prLabels.some((l) => l.endsWith(":implementation"))) {
+            const result = {
+                stage: "fix",
+                prNumber,
+                labels: prLabels,
+                payload: payload,
+            };
+            core.info(`🔥 Kiln Router — Matched stage: fix (pull_request_review.submitted changes_requested on implementation PR)`);
+            return result;
         }
-        // Impl PR: approved → ship
+        // Impl PR: approved → release
         if (state === "approved" &&
-            labelNames.some((l) => l.endsWith(":implementation"))) {
-            return "ship";
+            prLabels.some((l) => l.endsWith(":implementation"))) {
+            const result = {
+                stage: "release",
+                prNumber,
+                labels: prLabels,
+                payload: payload,
+            };
+            core.info(`🔥 Kiln Router — Matched stage: release (pull_request_review.submitted approved on implementation PR)`);
+            return result;
         }
     }
     // ── Check Suite (CI) Events ───────────────────────────
     if (eventName === "check_suite" && payload.action === "completed") {
         const prs = payload.check_suite?.pull_requests || [];
         if (prs.length > 0) {
-            return "ship";
+            const result = {
+                stage: "release",
+                labels: [],
+                payload: payload,
+            };
+            core.info(`🔥 Kiln Router — Matched stage: release (check_suite.completed with associated PRs)`);
+            return result;
         }
     }
+    core.info(`🔥 Kiln Router — No matching stage for event: ${eventName}.${payload.action || ""}`);
     return null;
+}
+function extractLabels(labels) {
+    if (!Array.isArray(labels))
+        return [];
+    return labels.map((l) => l.name);
 }
 //# sourceMappingURL=router.js.map
 

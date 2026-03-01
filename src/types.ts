@@ -33,6 +33,14 @@ export interface KilnContext {
   token: string;
 }
 
+export interface RouteResult {
+  stage: string;
+  issueNumber?: number;
+  prNumber?: number;
+  labels: string[];
+  payload: Record<string, unknown>;
+}
+
 export interface StageResult {
   status: string;
   nextStage?: string;
