@@ -19,7 +19,8 @@
 - Error comments are branded and API keys are redacted from any output
 - Triage stage: `runClaude` (read-only) for AI classification; `transitionLabel` from `labels.ts` for label transitions
 - Label prefix `{prefix}:needs-info` for needs-info label (not bare `needs-info`)
-- Labels.ts `LABEL_DEFS` includes `intake` and `needs-info` pipeline state labels
+- Labels.ts has four label groups: `PREFIXED_LABELS` (pipeline state), `STANDALONE_LABELS` (PR markers), `TYPE_LABELS`, `SIZE_LABELS`
+- `ensureLabels` creates all label types: prefixed (kiln:*), standalone (needs-human-review, needs-review), type:*, and size:*
 - Stage test pattern: mock `@actions/core`, `../claude`, `../labels`; use `makeOctokit`/`makeConfig`/`makeContext`/`makeCtx` helpers
 - For stages using `fs` and `child_process`: mock `child_process` with factory, mock `fs` with `jest.requireActual` partial mock to preserve `fs.promises` (needed by `@actions/core`)
 - Specify stage: `runClaudeEdit` (edit mode) for AI spec generation; `transitionLabel` for specifying→spec-review transition
@@ -27,6 +28,8 @@
 - Approve-spec stage: extracts issue number from branch name `kiln/spec/issue-{number}` (fallback to PR body `Tracking issue: #N`), squash merges, transitions spec-review→implementing
 - Review stage: uses `runClaude` (read-only), fetches diff and file list via GitHub API, reads spec file from checkout, posts PR review via `pulls.createReview` with inline comments
 - Fix stage: uses `runClaudeEdit` for fixes + `runClaude` (read-only) for generating reply text per review comment; replies via `pulls.createReplyForReviewComment`
+- Ship stage: pure GitHub API stage (no Claude); handles both `pull_request_review` and `check_suite` events; fetches PR via `pulls.get` for check_suite events
+- For `check_suite.completed` events, PR data must be fetched via `pulls.get` — `payload.pull_request` is absent
 
 ## 2026-03-01 - US-001
 - Converted project from JavaScript to TypeScript
@@ -261,4 +264,45 @@
   - Reply generation uses a separate Claude call per comment — this could be expensive for many comments but keeps replies specific
   - Review comments have both `line` and `original_line` — use `line || original_line` since `line` can be null for outdated diffs
   - The fix stage mock pattern: mock `../claude` for both `runClaudeEdit` and `runClaude`, mock `child_process` with factory
+---
+
+## 2026-03-01 - US-012
+- Enhanced existing `src/stages/ship.ts` handler to meet all 10 acceptance criteria
+- Added `check_suite.completed` event support: resolves PR via `pulls.get` from check suite's associated PRs (AC1)
+- Added implementation label check: skips PRs without `:implementation` label suffix (AC2)
+- Fixed CI check logic: removed `status === "queued"` from passing conditions — only `success` and `skipped` count (AC4)
+- Made `Closes #N` matching case-insensitive (AC6), consistent with review stage
+- Existing handler already covered: approval check (AC3), squash merge (AC5), done label via transitionLabel (AC7), issue close (AC8), branded release comment (AC9), no-op on unmet conditions (AC10)
+- Auto-merge disabled path preserved (posts informational comment without merging)
+- Wrote 34 comprehensive tests in `src/stages/ship.test.ts` covering all AC
+- Tests cover: trigger events (PR review + check_suite), implementation label check (present, absent, custom prefix, check_suite), approval check (no approvals, changes_requested, mixed reviews, empty), CI checks (failure, success, skipped, kiln exclusion, queued not passing, SHA lookup), squash merge (method, title, failure, no post-merge on error, logging), issue number extraction (Closes #N, case-insensitive, null body, no match), done label (transition, custom prefix), close issue (linked, no link), release comment (branded, shipped, PR ref), no-op conditions, auto-merge disabled
+- Files changed:
+  - src/stages/ship.ts (added check_suite support, implementation label check, fixed CI logic, case-insensitive regex)
+  - src/stages/ship.test.ts (new — 34 tests)
+  - .chief/prds/main/prd.json (marked US-012 as passing)
+  - dist/index.js (rebuilt)
+- **Learnings for future iterations:**
+  - The ship stage is a pure GitHub API stage (like approve-spec) — no Claude invocation needed
+  - For `check_suite.completed` events, `payload.pull_request` is absent — must fetch PR via `pulls.get` using check suite's associated PR numbers
+  - Use `as unknown as typeof pr` to bridge type mismatch between `pulls.get` response (body: `string | null`) and payload PR type (body: `string | undefined`)
+  - The ship handler checks implementation label itself (not just relying on router) because check_suite events don't carry PR labels in the router
+  - CI check conclusion for queued checks is `null`, not `"queued"` — don't treat null conclusions as passing
+---
+
+## 2026-03-01 - US-013
+- Documented all required labels with names, descriptions, and hex colors in README
+- Organized labels into 4 categories: Pipeline State, PR Markers, Type, and Size
+- Added `gh label create` commands as manual setup script in README
+- Extended `ensureLabels` in `src/labels.ts` to auto-create all label types (standalone PR markers, type:*, size:*)
+- Updated `docs/configuration.md` Label Reference to include all labels
+- Files changed:
+  - src/labels.ts (split LABEL_DEFS into PREFIXED_LABELS, STANDALONE_LABELS, TYPE_LABELS, SIZE_LABELS; updated ensureLabels to create all)
+  - README.md (expanded Labels section with 4 sub-tables including hex colors + manual setup gh CLI commands)
+  - docs/configuration.md (updated Label Reference table with full label list)
+  - dist/index.js (rebuilt)
+- **Learnings for future iterations:**
+  - Labels fall into 4 categories: prefixed pipeline state (`kiln:*`), PR markers (`needs-human-review`, `needs-review`), type (`type:*`), and size (`size:*`)
+  - Standalone labels like `needs-human-review` don't use the configurable prefix
+  - Type and size labels use fixed prefixes (`type:`, `size:`), not the configurable kiln prefix
+  - The `ensureLabels` function runs on first action invocation and creates missing labels idempotently
 ---

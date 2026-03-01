@@ -116,16 +116,83 @@ See [docs/configuration.md](docs/configuration.md) for full config options.
 
 ## Labels
 
-Kiln auto-creates these labels on first run:
+Kiln auto-creates all required labels on first run. You can also create them manually using the setup script below.
 
-| Label | Meaning |
-|---|---|
-| `kiln:specifying` | Spec agent is working |
-| `kiln:spec-review` | Waiting for human approval |
-| `kiln:implementing` | Code agent is building |
-| `kiln:in-review` | PR under AI review |
-| `kiln:done` | Shipped |
-| `kiln:blocked` | Emergency stop — halts all automation |
+### Pipeline State
+
+| Label | Color | Hex | Description |
+|---|---|---|---|
+| `kiln:intake` | ![#c5def5](https://via.placeholder.com/12/c5def5/c5def5.png) | `#c5def5` | Issue received, awaiting triage |
+| `kiln:needs-info` | ![#fbca04](https://via.placeholder.com/12/fbca04/fbca04.png) | `#fbca04` | Waiting for clarification from author |
+| `kiln:specifying` | ![#c5def5](https://via.placeholder.com/12/c5def5/c5def5.png) | `#c5def5` | Spec agent is writing the spec |
+| `kiln:spec-review` | ![#fbca04](https://via.placeholder.com/12/fbca04/fbca04.png) | `#fbca04` | Waiting for human spec approval |
+| `kiln:implementing` | ![#0e8a16](https://via.placeholder.com/12/0e8a16/0e8a16.png) | `#0e8a16` | Code agent is building |
+| `kiln:in-review` | ![#e4e669](https://via.placeholder.com/12/e4e669/e4e669.png) | `#e4e669` | Under AI code review |
+| `kiln:done` | ![#0e8a16](https://via.placeholder.com/12/0e8a16/0e8a16.png) | `#0e8a16` | Shipped and closed |
+| `kiln:blocked` | ![#d93f0b](https://via.placeholder.com/12/d93f0b/d93f0b.png) | `#d93f0b` | Emergency stop — all automation halts |
+
+### PR Markers
+
+| Label | Color | Hex | Description |
+|---|---|---|---|
+| `kiln:spec` | ![#c5def5](https://via.placeholder.com/12/c5def5/c5def5.png) | `#c5def5` | Spec PR |
+| `kiln:implementation` | ![#0e8a16](https://via.placeholder.com/12/0e8a16/0e8a16.png) | `#0e8a16` | Implementation PR |
+| `needs-human-review` | ![#fbca04](https://via.placeholder.com/12/fbca04/fbca04.png) | `#fbca04` | Requires human review before proceeding |
+| `needs-review` | ![#fbca04](https://via.placeholder.com/12/fbca04/fbca04.png) | `#fbca04` | Awaiting AI code review |
+
+### Type (applied by triage)
+
+| Label | Color | Hex | Description |
+|---|---|---|---|
+| `type:feature` | ![#0075ca](https://via.placeholder.com/12/0075ca/0075ca.png) | `#0075ca` | New feature |
+| `type:bug` | ![#d73a4a](https://via.placeholder.com/12/d73a4a/d73a4a.png) | `#d73a4a` | Bug fix |
+| `type:improvement` | ![#a2eeef](https://via.placeholder.com/12/a2eeef/a2eeef.png) | `#a2eeef` | Improvement to existing feature |
+| `type:chore` | ![#cfd3d7](https://via.placeholder.com/12/cfd3d7/cfd3d7.png) | `#cfd3d7` | Maintenance or chore |
+
+### Size (applied by triage)
+
+| Label | Color | Hex | Description |
+|---|---|---|---|
+| `size:xs` | ![#009800](https://via.placeholder.com/12/009800/009800.png) | `#009800` | Extra small |
+| `size:s` | ![#77bb00](https://via.placeholder.com/12/77bb00/77bb00.png) | `#77bb00` | Small |
+| `size:m` | ![#fbca04](https://via.placeholder.com/12/fbca04/fbca04.png) | `#fbca04` | Medium |
+| `size:l` | ![#eb6420](https://via.placeholder.com/12/eb6420/eb6420.png) | `#eb6420` | Large |
+| `size:xl` | ![#b60205](https://via.placeholder.com/12/b60205/b60205.png) | `#b60205` | Extra large |
+
+### Manual Setup
+
+Labels are created automatically on first run. To create them manually, use the GitHub CLI:
+
+```bash
+# Pipeline state labels
+gh label create "kiln:intake" --color "c5def5" --description "Kiln: issue received, awaiting triage"
+gh label create "kiln:needs-info" --color "fbca04" --description "Kiln: waiting for clarification from author"
+gh label create "kiln:specifying" --color "c5def5" --description "Kiln: spec agent is writing the spec"
+gh label create "kiln:spec-review" --color "fbca04" --description "Kiln: waiting for human spec approval"
+gh label create "kiln:implementing" --color "0e8a16" --description "Kiln: code agent is building"
+gh label create "kiln:in-review" --color "e4e669" --description "Kiln: under AI code review"
+gh label create "kiln:done" --color "0e8a16" --description "Kiln: shipped and closed"
+gh label create "kiln:blocked" --color "d93f0b" --description "Kiln: emergency stop — all automation halts"
+
+# PR marker labels
+gh label create "kiln:spec" --color "c5def5" --description "Kiln: spec PR"
+gh label create "kiln:implementation" --color "0e8a16" --description "Kiln: implementation PR"
+gh label create "needs-human-review" --color "fbca04" --description "Kiln: requires human review before proceeding"
+gh label create "needs-review" --color "fbca04" --description "Kiln: awaiting AI code review"
+
+# Type labels
+gh label create "type:feature" --color "0075ca" --description "Type: new feature"
+gh label create "type:bug" --color "d73a4a" --description "Type: bug fix"
+gh label create "type:improvement" --color "a2eeef" --description "Type: improvement to existing feature"
+gh label create "type:chore" --color "cfd3d7" --description "Type: maintenance or chore"
+
+# Size labels
+gh label create "size:xs" --color "009800" --description "Size: extra small"
+gh label create "size:s" --color "77bb00" --description "Size: small"
+gh label create "size:m" --color "fbca04" --description "Size: medium"
+gh label create "size:l" --color "eb6420" --description "Size: large"
+gh label create "size:xl" --color "b60205" --description "Size: extra large"
+```
 
 ## Safety
 

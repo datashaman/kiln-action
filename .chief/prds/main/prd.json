@@ -216,7 +216,8 @@
         "A setup script or GitHub Actions workflow is provided (or documented steps) to create all labels"
       ],
       "priority": 13,
-      "passes": false
+      "passes": true,
+      "inProgress": false
     },
     {
       "id": "US-014",

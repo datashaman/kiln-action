@@ -530,7 +530,7 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.ensureLabels = ensureLabels;
 exports.transitionLabel = transitionLabel;
 const core = __importStar(__nccwpck_require__(7484));
-const LABEL_DEFS = [
+const PREFIXED_LABELS = [
     {
         suffix: "intake",
         color: "c5def5",
@@ -578,6 +578,39 @@ const LABEL_DEFS = [
         description: "Kiln: emergency stop — all automation halts",
     },
 ];
+const STANDALONE_LABELS = [
+    {
+        name: "needs-human-review",
+        color: "fbca04",
+        description: "Kiln: requires human review before proceeding",
+    },
+    {
+        name: "needs-review",
+        color: "fbca04",
+        description: "Kiln: awaiting AI code review",
+    },
+];
+const TYPE_LABELS = [
+    { suffix: "feature", color: "0075ca", description: "Type: new feature" },
+    { suffix: "bug", color: "d73a4a", description: "Type: bug fix" },
+    {
+        suffix: "improvement",
+        color: "a2eeef",
+        description: "Type: improvement to existing feature",
+    },
+    {
+        suffix: "chore",
+        color: "cfd3d7",
+        description: "Type: maintenance or chore",
+    },
+];
+const SIZE_LABELS = [
+    { suffix: "xs", color: "009800", description: "Size: extra small" },
+    { suffix: "s", color: "77bb00", description: "Size: small" },
+    { suffix: "m", color: "fbca04", description: "Size: medium" },
+    { suffix: "l", color: "eb6420", description: "Size: large" },
+    { suffix: "xl", color: "b60205", description: "Size: extra large" },
+];
 async function ensureLabels(octokit, context, config) {
     const prefix = config.labels?.prefix || "kiln";
     const { data: existing } = await octokit.rest.issues.listLabelsForRepo({
@@ -585,21 +618,50 @@ async function ensureLabels(octokit, context, config) {
         per_page: 100,
     });
     const existingNames = new Set(existing.map((l) => l.name));
-    for (const def of LABEL_DEFS) {
-        const name = `${prefix}:${def.suffix}`;
-        if (!existingNames.has(name)) {
+    // Build the full list of labels to create
+    const allLabels = [];
+    // Prefixed pipeline labels (e.g., kiln:specifying)
+    for (const def of PREFIXED_LABELS) {
+        allLabels.push({
+            name: `${prefix}:${def.suffix}`,
+            color: def.color,
+            description: def.description,
+        });
+    }
+    // Standalone PR marker labels
+    for (const def of STANDALONE_LABELS) {
+        allLabels.push(def);
+    }
+    // Type labels (type:feature, type:bug, etc.)
+    for (const def of TYPE_LABELS) {
+        allLabels.push({
+            name: `type:${def.suffix}`,
+            color: def.color,
+            description: def.description,
+        });
+    }
+    // Size labels (size:xs, size:s, etc.)
+    for (const def of SIZE_LABELS) {
+        allLabels.push({
+            name: `size:${def.suffix}`,
+            color: def.color,
+            description: def.description,
+        });
+    }
+    for (const label of allLabels) {
+        if (!existingNames.has(label.name)) {
             try {
                 await octokit.rest.issues.createLabel({
                     ...context.repo,
-                    name,
-                    color: def.color,
-                    description: def.description,
+                    name: label.name,
+                    color: label.color,
+                    description: label.description,
                 });
-                core.info(`Created label: ${name}`);
+                core.info(`Created label: ${label.name}`);
             }
             catch (error) {
                 const message = error instanceof Error ? error.message : String(error);
-                core.warning(`Failed to create label ${name}: ${message}`);
+                core.warning(`Failed to create label ${label.name}: ${message}`);
             }
         }
     }

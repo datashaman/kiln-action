@@ -136,10 +136,12 @@ Kiln uses these branch conventions (not configurable):
 
 ## Label Reference
 
-Created automatically on first run:
+Created automatically on first run. See the [Labels section in the README](../README.md#labels) for full details including hex colors.
 
 | Label | Purpose |
 |---|---|
+| `{prefix}:intake` | Issue received, awaiting triage |
+| `{prefix}:needs-info` | Waiting for clarification from author |
 | `{prefix}:specifying` | Spec agent is writing the spec |
 | `{prefix}:spec` | Applied to spec PRs |
 | `{prefix}:spec-review` | Waiting for human spec approval |
@@ -148,3 +150,10 @@ Created automatically on first run:
 | `{prefix}:in-review` | Under AI code review |
 | `{prefix}:done` | Shipped and closed |
 | `{prefix}:blocked` | Emergency stop — all automation halts |
+| `needs-human-review` | Requires human review before proceeding |
+| `needs-review` | Awaiting AI code review |
+| `type:feature` | New feature |
+| `type:bug` | Bug fix |
+| `type:improvement` | Improvement to existing feature |
+| `type:chore` | Maintenance or chore |
+| `size:xs` — `size:xl` | Complexity sizing (xs, s, m, l, xl) |
