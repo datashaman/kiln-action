@@ -77,10 +77,17 @@ jobs:
           export ISSUE_NUMBER ISSUE_TITLE ISSUE_BODY
           PROMPT=$(envsubst '$ISSUE_NUMBER $ISSUE_TITLE $ISSUE_BODY' < .kiln/prompts/triage.md)
 
-          RESULT=$(echo "$PROMPT" | claude --print --dangerously-skip-permissions 2>claude_stderr.txt) || {
-            gh issue comment "$ISSUE_NUMBER" --body "🔥 **Kiln** — Claude error: $(cat claude_stderr.txt)"
+          set +e
+          RESULT=$(echo "$PROMPT" | claude --print --dangerously-skip-permissions 2>claude_stderr.txt)
+          CLAUDE_EXIT=$?
+          set -e
+
+          if [ $CLAUDE_EXIT -ne 0 ]; then
+            STDERR_MSG=$(cat claude_stderr.txt 2>/dev/null || true)
+            ERROR_MSG="${STDERR_MSG:-$RESULT}"
+            gh issue comment "$ISSUE_NUMBER" --body "🔥 **Kiln** — Claude error (exit $CLAUDE_EXIT): ${ERROR_MSG:-(no output)}"
             exit 1
-          }
+          fi
 
           # Extract JSON from possible markdown fence
           JSON=$(echo "$RESULT" | sed -n '/^```json$/,/^```$/p' | sed '1d;$d')
@@ -178,10 +185,17 @@ jobs:
           export ISSUE_NUMBER ISSUE_TITLE ISSUE_BODY COMMENT_THREAD
           PROMPT=$(envsubst '$ISSUE_NUMBER $ISSUE_TITLE $ISSUE_BODY $COMMENT_THREAD' < .kiln/prompts/retriage.md)
 
-          RESULT=$(echo "$PROMPT" | claude --print --dangerously-skip-permissions 2>claude_stderr.txt) || {
-            gh issue comment "$ISSUE_NUMBER" --body "🔥 **Kiln** — Claude error: $(cat claude_stderr.txt)"
+          set +e
+          RESULT=$(echo "$PROMPT" | claude --print --dangerously-skip-permissions 2>claude_stderr.txt)
+          CLAUDE_EXIT=$?
+          set -e
+
+          if [ $CLAUDE_EXIT -ne 0 ]; then
+            STDERR_MSG=$(cat claude_stderr.txt 2>/dev/null || true)
+            ERROR_MSG="${STDERR_MSG:-$RESULT}"
+            gh issue comment "$ISSUE_NUMBER" --body "🔥 **Kiln** — Claude error (exit $CLAUDE_EXIT): ${ERROR_MSG:-(no output)}"
             exit 1
-          }
+          fi
 
           # Extract JSON
           JSON=$(echo "$RESULT" | sed -n '/^```json$/,/^```$/p' | sed '1d;$d')
@@ -282,10 +296,17 @@ jobs:
           export ISSUE_NUMBER ISSUE_TITLE ISSUE_BODY SPEC_TEMPLATE
           PROMPT=$(envsubst '$ISSUE_NUMBER $ISSUE_TITLE $ISSUE_BODY $SPEC_TEMPLATE' < .kiln/prompts/specify.md)
 
-          echo "$PROMPT" | claude --dangerously-skip-permissions 2>claude_stderr.txt || {
-            gh issue comment "$ISSUE_NUMBER" --body "🔥 **Kiln** — Claude error: $(cat claude_stderr.txt)"
+          set +e
+          CLAUDE_OUT=$(echo "$PROMPT" | claude --dangerously-skip-permissions 2>claude_stderr.txt)
+          CLAUDE_EXIT=$?
+          set -e
+
+          if [ $CLAUDE_EXIT -ne 0 ]; then
+            STDERR_MSG=$(cat claude_stderr.txt 2>/dev/null || true)
+            ERROR_MSG="${STDERR_MSG:-$CLAUDE_OUT}"
+            gh issue comment "$ISSUE_NUMBER" --body "🔥 **Kiln** — Claude error (exit $CLAUDE_EXIT): ${ERROR_MSG:-(no output)}"
             exit 1
-          }
+          fi
 
           # Ensure spec file exists and is committed
           SPEC_PATH="specs/issue-${ISSUE_NUMBER}.md"
@@ -458,10 +479,17 @@ jobs:
           export ISSUE_NUMBER ISSUE_TITLE SPEC_PATH PROTECTED_LIST
           PROMPT=$(envsubst '$ISSUE_NUMBER $ISSUE_TITLE $SPEC_PATH $PROTECTED_LIST' < .kiln/prompts/implement.md)
 
-          echo "$PROMPT" | claude --dangerously-skip-permissions 2>claude_stderr.txt || {
-            gh issue comment "$ISSUE_NUMBER" --body "🔥 **Kiln** — Claude error: $(cat claude_stderr.txt)"
+          set +e
+          CLAUDE_OUT=$(echo "$PROMPT" | claude --dangerously-skip-permissions 2>claude_stderr.txt)
+          CLAUDE_EXIT=$?
+          set -e
+
+          if [ $CLAUDE_EXIT -ne 0 ]; then
+            STDERR_MSG=$(cat claude_stderr.txt 2>/dev/null || true)
+            ERROR_MSG="${STDERR_MSG:-$CLAUDE_OUT}"
+            gh issue comment "$ISSUE_NUMBER" --body "🔥 **Kiln** — Claude error (exit $CLAUDE_EXIT): ${ERROR_MSG:-(no output)}"
             exit 1
-          }
+          fi
 
           # Push (Claude may have already pushed)
           git push origin "$BRANCH" --force 2>/dev/null || true
@@ -550,10 +578,17 @@ jobs:
           export PR_NUMBER PR_TITLE FILE_LIST PR_DIFF SPEC_REF_LINE SPEC_CONTENT SPEC_REVIEW_LINE
           PROMPT=$(envsubst '$PR_NUMBER $PR_TITLE $SPEC_REF_LINE $SPEC_CONTENT $FILE_LIST $PR_DIFF $SPEC_REVIEW_LINE' < .kiln/prompts/review.md)
 
-          RESULT=$(echo "$PROMPT" | claude --print --dangerously-skip-permissions 2>claude_stderr.txt) || {
-            gh pr comment "$PR_NUMBER" --body "🔥 **Kiln** — Claude error: $(cat claude_stderr.txt)"
+          set +e
+          RESULT=$(echo "$PROMPT" | claude --print --dangerously-skip-permissions 2>claude_stderr.txt)
+          CLAUDE_EXIT=$?
+          set -e
+
+          if [ $CLAUDE_EXIT -ne 0 ]; then
+            STDERR_MSG=$(cat claude_stderr.txt 2>/dev/null || true)
+            ERROR_MSG="${STDERR_MSG:-$RESULT}"
+            gh pr comment "$PR_NUMBER" --body "🔥 **Kiln** — Claude error (exit $CLAUDE_EXIT): ${ERROR_MSG:-(no output)}"
             exit 1
-          }
+          fi
 
           # Extract JSON
           JSON=$(echo "$RESULT" | sed -n '/^```json$/,/^```$/p' | sed '1d;$d')
@@ -686,10 +721,17 @@ jobs:
           export PR_NUMBER PR_TITLE FEEDBACK FIX_ITERATION
           PROMPT=$(envsubst '$PR_NUMBER $PR_TITLE $FEEDBACK $FIX_ITERATION' < .kiln/prompts/fix.md)
 
-          echo "$PROMPT" | claude --dangerously-skip-permissions 2>claude_stderr.txt || {
-            gh pr comment "$PR_NUMBER" --body "🔥 **Kiln** — Claude error: $(cat claude_stderr.txt)"
+          set +e
+          CLAUDE_OUT=$(echo "$PROMPT" | claude --dangerously-skip-permissions 2>claude_stderr.txt)
+          CLAUDE_EXIT=$?
+          set -e
+
+          if [ $CLAUDE_EXIT -ne 0 ]; then
+            STDERR_MSG=$(cat claude_stderr.txt 2>/dev/null || true)
+            ERROR_MSG="${STDERR_MSG:-$CLAUDE_OUT}"
+            gh pr comment "$PR_NUMBER" --body "🔥 **Kiln** — Claude error (exit $CLAUDE_EXIT): ${ERROR_MSG:-(no output)}"
             exit 1
-          }
+          fi
 
           # Push (Claude may have already pushed)
           git push origin "${{ github.event.pull_request.head.ref }}" 2>/dev/null || true
