@@ -57,7 +57,8 @@
         "API key is passed securely (never logged or exposed in comments)"
       ],
       "priority": 4,
-      "passes": false
+      "passes": true,
+      "inProgress": false
     },
     {
       "id": "US-005",

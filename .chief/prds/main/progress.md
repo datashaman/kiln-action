@@ -13,6 +13,9 @@
 - Only `anthropic_api_key` is a required input; others have defaults
 - Blocked guard in `src/blocked.ts` runs before stage detection; checks `{prefix}:blocked` label on issues and PRs
 - For PR events, blocked guard checks both PR labels and linked issue labels (via `Closes #N` in PR body)
+- Claude integration layer in `src/claude.ts` exports `invokeClaude` (async, returns `ClaudeResult`), `runClaude` (sync, read-only), `runClaudeEdit` (sync, edit mode)
+- `invokeClaude` accepts `ClaudeConfig` with optional octokit/context for error comment surfacing
+- Error comments are branded and API keys are redacted from any output
 
 ## 2026-03-01 - US-001
 - Converted project from JavaScript to TypeScript
@@ -84,4 +87,28 @@
   - Use `as unknown as jest.Mock` when casting Octokit methods that TypeScript can't bridge to Mock type
   - PR body parsing uses `Closes #(\d+)` (case-insensitive) to find linked issue number
   - The blocked guard runs before stage detection in the pipeline — it's a pre-router check
+---
+
+## 2026-03-01 - US-004
+- Refactored `src/claude.ts` into a proper integration layer for Claude Code
+- Added `invokeClaude()` — the primary async utility function that returns `ClaudeResult` with structured success/error handling
+- `ClaudeConfig` interface accepts: prompt, anthropicKey, timeoutMinutes, allowEdits, octokit, context
+- Kept backward-compatible `runClaude()` and `runClaudeEdit()` wrappers used by existing stages
+- Timeout handling: defaults to 30 minutes (matching claude-code-action v1), detects killed processes for specific timeout messages
+- Error surfacing: posts branded "🔥 **Kiln** — Claude Code error:" comments on issues/PRs when octokit+context provided
+- API key security: passed only via `ANTHROPIC_API_KEY` env var (never in command string), redacted from error comments
+- Added `sanitizeOutput()` to strip API keys from any error messages before posting
+- Added `resolveCommentTarget()` to find the right issue/PR number from context payload
+- Comment posting is best-effort (catches failures)
+- Files changed:
+  - src/claude.ts (refactored - added invokeClaude, ClaudeConfig, ClaudeResult, error surfacing, API key redaction)
+  - src/claude.test.ts (new - 29 tests covering all AC)
+  - dist/index.js (rebuilt)
+- **Learnings for future iterations:**
+  - `anthropics/claude-code-action@v1` is a composite GitHub Action that cannot be invoked programmatically from TypeScript — it's only usable as a `uses:` step in workflow YAML
+  - The underlying SDK is `@anthropic-ai/claude-agent-sdk` (80MB, bundles entire CLI)
+  - For this project, shelling out to the `claude` CLI via `execSync` is the pragmatic approach (same as what claude-code-action does internally)
+  - Detect timeout via `error.killed` property on the error thrown by `execSync`
+  - Use `escapeRegExp()` when building regex from user-controlled strings (API key) to avoid regex injection
+  - `process.env.ANTHROPIC_API_KEY` in tests needs explicit cleanup in `beforeEach` to avoid test pollution
 ---
