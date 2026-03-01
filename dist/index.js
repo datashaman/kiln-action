@@ -130,13 +130,12 @@ const MAX_BUFFER_BYTES = 10 * 1024 * 1024; // 10MB
 async function invokeClaude(prompt, config) {
     const { anthropicKey, timeoutMinutes = DEFAULT_TIMEOUT_MINUTES, allowEdits = false, octokit, context, } = config;
     const timeoutMs = timeoutMinutes * 60 * 1000;
-    const escapedPrompt = escapeShell(prompt);
     // --print mode = read-only (no file edits); omit for edit mode
-    const command = allowEdits
-        ? `claude "${escapedPrompt}"`
-        : `claude --print "${escapedPrompt}"`;
+    const command = allowEdits ? "claude" : "claude --print";
     try {
+        // Pass prompt via stdin to avoid shell escaping issues with complex input
         const output = (0, child_process_1.execSync)(command, {
+            input: prompt,
             env: {
                 ...process.env,
                 ANTHROPIC_API_KEY: anthropicKey,
@@ -168,7 +167,8 @@ function runClaude(prompt, options) {
     const { anthropicKey, timeoutMinutes = DEFAULT_TIMEOUT_MINUTES } = options;
     const timeoutMs = timeoutMinutes * 60 * 1000;
     try {
-        const output = (0, child_process_1.execSync)(`claude --print "${escapeShell(prompt)}"`, {
+        const output = (0, child_process_1.execSync)("claude --print", {
+            input: prompt,
             env: { ...process.env, ANTHROPIC_API_KEY: anthropicKey },
             timeout: timeoutMs,
             maxBuffer: MAX_BUFFER_BYTES,
@@ -190,7 +190,8 @@ function runClaudeEdit(prompt, options) {
     const { anthropicKey, timeoutMinutes = DEFAULT_TIMEOUT_MINUTES } = options;
     const timeoutMs = timeoutMinutes * 60 * 1000;
     try {
-        const output = (0, child_process_1.execSync)(`claude "${escapeShell(prompt)}"`, {
+        const output = (0, child_process_1.execSync)("claude", {
+            input: prompt,
             env: { ...process.env, ANTHROPIC_API_KEY: anthropicKey },
             timeout: timeoutMs,
             maxBuffer: MAX_BUFFER_BYTES,
@@ -250,9 +251,6 @@ function sanitizeOutput(text, apiKey) {
     if (!apiKey)
         return text;
     return text.replace(new RegExp(escapeRegExp(apiKey), "g"), "[REDACTED]");
-}
-function escapeShell(str) {
-    return str.replace(/"/g, '\\"').replace(/\$/g, "\\$").replace(/`/g, "\\`");
 }
 function escapeRegExp(str) {
     return str.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
