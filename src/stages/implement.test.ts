@@ -88,7 +88,7 @@ function makeCtx(overrides: Partial<KilnContext> = {}): KilnContext {
 beforeEach(() => {
   jest.clearAllMocks();
   mockedTransitionLabel.mockResolvedValue(undefined);
-  mockedRunClaudeEdit.mockReturnValue("Implementation complete");
+  mockedRunClaudeEdit.mockResolvedValue("Implementation complete");
   mockedExecSync.mockReturnValue("");
 
   // By default, spec file exists (already merged from spec PR)

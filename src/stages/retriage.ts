@@ -63,7 +63,7 @@ Respond with ONLY this JSON:
 }
 \`\`\``;
 
-  const output = runClaude(prompt, { anthropicKey, timeoutMinutes });
+  const output = await runClaude(prompt, { anthropicKey, timeoutMinutes });
 
   let result: TriageResult;
   try {

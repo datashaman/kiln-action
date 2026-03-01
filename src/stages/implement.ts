@@ -81,7 +81,7 @@ DO NOT:
 
 After implementing, commit all changes and push to the current branch.`;
 
-  runClaudeEdit(prompt, { anthropicKey, timeoutMinutes });
+  await runClaudeEdit(prompt, { anthropicKey, timeoutMinutes });
 
   try {
     execSync(`git push origin ${branchName} --force`);

@@ -3,12 +3,78 @@ import { Context } from "@actions/github/lib/context";
 import { Octokit } from "./types";
 
 jest.mock("@actions/core");
-jest.mock("child_process");
+jest.mock("@anthropic-ai/claude-agent-sdk");
 
 import * as core from "@actions/core";
-import { execSync } from "child_process";
+import { query } from "@anthropic-ai/claude-agent-sdk";
 
-const mockedExecSync = execSync as unknown as jest.Mock;
+const mockedQuery = query as unknown as jest.Mock;
+
+/**
+ * Helper: create a mock async generator that yields a successful SDKResultMessage.
+ */
+function mockQuerySuccess(text: string) {
+  async function* gen() {
+    yield {
+      type: "result" as const,
+      subtype: "success" as const,
+      result: text,
+      is_error: false,
+      duration_ms: 100,
+      duration_api_ms: 80,
+      num_turns: 1,
+      stop_reason: "end_turn",
+      total_cost_usd: 0.01,
+      usage: { input_tokens: 10, output_tokens: 20 },
+      modelUsage: {},
+      permission_denials: [],
+      uuid: "test-uuid",
+      session_id: "test-session",
+    };
+  }
+  return gen();
+}
+
+/**
+ * Helper: create a mock async generator that yields an error SDKResultMessage.
+ */
+function mockQueryError(errors: string[]) {
+  async function* gen() {
+    yield {
+      type: "result" as const,
+      subtype: "error_during_execution" as const,
+      errors,
+      is_error: true,
+      duration_ms: 100,
+      duration_api_ms: 80,
+      num_turns: 1,
+      stop_reason: null,
+      total_cost_usd: 0.01,
+      usage: { input_tokens: 10, output_tokens: 0 },
+      modelUsage: {},
+      permission_denials: [],
+      uuid: "test-uuid",
+      session_id: "test-session",
+    };
+  }
+  return gen();
+}
+
+/**
+ * Helper: create a mock async generator that yields no result message.
+ */
+function mockQueryNoResult() {
+  async function* gen() {
+    yield {
+      type: "assistant" as const,
+      uuid: "test-uuid",
+      session_id: "test-session",
+      message: {},
+      parent_tool_use_id: null,
+    };
+  }
+  return gen();
+}
 
 function makeOctokit(): Octokit {
   return {
@@ -41,7 +107,7 @@ beforeEach(() => {
 describe("invokeClaude", () => {
   describe("accepts prompt, API key, and optional config", () => {
     it("passes prompt and returns output", async () => {
-      mockedExecSync.mockReturnValue("  Claude says hello  ");
+      mockedQuery.mockReturnValue(mockQuerySuccess("  Claude says hello  "));
 
       const result = await invokeClaude("Hello Claude", {
         anthropicKey: "sk-ant-test-key",
@@ -52,7 +118,7 @@ describe("invokeClaude", () => {
     });
 
     it("accepts optional configuration (timeout, allowEdits, octokit, context)", async () => {
-      mockedExecSync.mockReturnValue("output");
+      mockedQuery.mockReturnValue(mockQuerySuccess("output"));
       const octokit = makeOctokit();
       const context = makeContext("issues", { issue: { number: 1 } });
 
@@ -69,38 +135,45 @@ describe("invokeClaude", () => {
     });
   });
 
-  describe("invokes Claude CLI with the prompt", () => {
-    it("uses --print mode by default (read-only)", async () => {
-      mockedExecSync.mockReturnValue("output");
+  describe("invokes Claude SDK with the prompt", () => {
+    it("uses read-only tools by default", async () => {
+      mockedQuery.mockReturnValue(mockQuerySuccess("output"));
 
       await invokeClaude("Review this code", {
         anthropicKey: "sk-ant-test",
       });
 
-      expect(mockedExecSync).toHaveBeenCalledWith(
-        "claude --print",
-        expect.objectContaining({ input: "Review this code" }),
+      expect(mockedQuery).toHaveBeenCalledWith(
+        expect.objectContaining({
+          prompt: "Review this code",
+          options: expect.objectContaining({
+            allowedTools: ["Read", "Glob", "Grep"],
+          }),
+        }),
       );
     });
 
-    it("uses edit mode when allowEdits is true", async () => {
-      mockedExecSync.mockReturnValue("output");
+    it("uses edit tools when allowEdits is true", async () => {
+      mockedQuery.mockReturnValue(mockQuerySuccess("output"));
 
       await invokeClaude("Fix this bug", {
         anthropicKey: "sk-ant-test",
         allowEdits: true,
       });
 
-      expect(mockedExecSync).toHaveBeenCalledWith(
-        "claude",
-        expect.objectContaining({ input: "Fix this bug" }),
+      expect(mockedQuery).toHaveBeenCalledWith(
+        expect.objectContaining({
+          options: expect.objectContaining({
+            allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+          }),
+        }),
       );
     });
   });
 
   describe("captures and returns output", () => {
     it("returns trimmed output in ClaudeResult", async () => {
-      mockedExecSync.mockReturnValue("\n  { \"type\": \"bug\" }  \n");
+      mockedQuery.mockReturnValue(mockQuerySuccess('\n  { "type": "bug" }  \n'));
 
       const result = await invokeClaude("triage", {
         anthropicKey: "sk-ant-test",
@@ -113,41 +186,13 @@ describe("invokeClaude", () => {
   });
 
   describe("handles timeouts", () => {
-    it("defaults to 30 minutes timeout", async () => {
-      mockedExecSync.mockReturnValue("ok");
-
-      await invokeClaude("prompt", { anthropicKey: "sk-ant-test" });
-
-      expect(mockedExecSync).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          timeout: 30 * 60 * 1000,
-        }),
-      );
-    });
-
-    it("uses custom timeout when specified", async () => {
-      mockedExecSync.mockReturnValue("ok");
-
-      await invokeClaude("prompt", {
-        anthropicKey: "sk-ant-test",
-        timeoutMinutes: 15,
-      });
-
-      expect(mockedExecSync).toHaveBeenCalledWith(
-        expect.any(String),
-        expect.objectContaining({
-          timeout: 15 * 60 * 1000,
-        }),
-      );
-    });
-
-    it("returns specific timeout error message when killed", async () => {
-      const error = new Error("Command timed out");
-      (error as NodeJS.ErrnoException & { killed?: boolean }).killed = true;
-      mockedExecSync.mockImplementation(() => {
+    it("returns specific timeout error message when aborted", async () => {
+      mockedQuery.mockReturnValue((async function* () {
+        const error = new Error("Aborted");
+        error.name = "AbortError";
         throw error;
-      });
+        yield; // unreachable, satisfies require-yield
+      })());
 
       const result = await invokeClaude("prompt", {
         anthropicKey: "sk-ant-test",
@@ -160,10 +205,8 @@ describe("invokeClaude", () => {
   });
 
   describe("handles errors and surfaces them as comments", () => {
-    it("returns error result on failure", async () => {
-      mockedExecSync.mockImplementation(() => {
-        throw new Error("CLI not found");
-      });
+    it("returns error result on SDK error", async () => {
+      mockedQuery.mockReturnValue(mockQueryError(["CLI not found"]));
 
       const result = await invokeClaude("prompt", {
         anthropicKey: "sk-ant-test",
@@ -174,10 +217,20 @@ describe("invokeClaude", () => {
       expect(result.output).toBe("");
     });
 
-    it("posts error comment on issue when octokit and context provided", async () => {
-      mockedExecSync.mockImplementation(() => {
-        throw new Error("API rate limited");
+    it("returns error result when no result message received", async () => {
+      mockedQuery.mockReturnValue(mockQueryNoResult());
+
+      const result = await invokeClaude("prompt", {
+        anthropicKey: "sk-ant-test",
       });
+
+      expect(result.success).toBe(false);
+      expect(result.error).toBe("No result received from Claude Agent SDK");
+      expect(result.output).toBe("");
+    });
+
+    it("posts error comment on issue when octokit and context provided", async () => {
+      mockedQuery.mockReturnValue(mockQueryError(["API rate limited"]));
 
       const octokit = makeOctokit();
       const context = makeContext("issues", {
@@ -199,9 +252,7 @@ describe("invokeClaude", () => {
     });
 
     it("posts error comment on PR when context has pull_request", async () => {
-      mockedExecSync.mockImplementation(() => {
-        throw new Error("Network error");
-      });
+      mockedQuery.mockReturnValue(mockQueryError(["Network error"]));
 
       const octokit = makeOctokit();
       const context = makeContext("pull_request", {
@@ -220,9 +271,7 @@ describe("invokeClaude", () => {
     });
 
     it("does not throw when comment posting fails", async () => {
-      mockedExecSync.mockImplementation(() => {
-        throw new Error("fail");
-      });
+      mockedQuery.mockReturnValue(mockQueryError(["fail"]));
 
       const octokit = makeOctokit();
       (octokit.rest.issues.createComment as unknown as jest.Mock).mockRejectedValue(
@@ -241,9 +290,7 @@ describe("invokeClaude", () => {
     });
 
     it("skips posting comment when no octokit/context provided", async () => {
-      mockedExecSync.mockImplementation(() => {
-        throw new Error("fail");
-      });
+      mockedQuery.mockReturnValue(mockQueryError(["fail"]));
 
       const result = await invokeClaude("prompt", {
         anthropicKey: "sk-ant-test",
@@ -254,9 +301,7 @@ describe("invokeClaude", () => {
     });
 
     it("skips posting comment when context has no issue or PR", async () => {
-      mockedExecSync.mockImplementation(() => {
-        throw new Error("fail");
-      });
+      mockedQuery.mockReturnValue(mockQueryError(["fail"]));
 
       const octokit = makeOctokit();
       const context = makeContext("push", {});
@@ -271,9 +316,7 @@ describe("invokeClaude", () => {
     });
 
     it("error comment is branded with Kiln prefix", async () => {
-      mockedExecSync.mockImplementation(() => {
-        throw new Error("something broke");
-      });
+      mockedQuery.mockReturnValue(mockQueryError(["something broke"]));
 
       const octokit = makeOctokit();
       const context = makeContext("issues", { issue: { number: 1 } });
@@ -293,30 +336,26 @@ describe("invokeClaude", () => {
   });
 
   describe("API key security", () => {
-    it("passes API key via environment variable, not in command", async () => {
-      mockedExecSync.mockReturnValue("output");
+    it("passes API key via env, not in prompt", async () => {
+      mockedQuery.mockReturnValue(mockQuerySuccess("output"));
 
       await invokeClaude("prompt", {
         anthropicKey: "sk-ant-secret-key-12345",
       });
 
-      const callArgs = mockedExecSync.mock.calls[0];
-      const command = callArgs[0] as string;
-      const options = callArgs[1] as { env: Record<string, string> };
+      const callArgs = mockedQuery.mock.calls[0][0];
 
-      // API key must NOT appear in the command string
-      expect(command).not.toContain("sk-ant-secret-key-12345");
+      // API key must NOT appear in the prompt
+      expect(callArgs.prompt).not.toContain("sk-ant-secret-key-12345");
       // API key must be in env
-      expect(options.env.ANTHROPIC_API_KEY).toBe("sk-ant-secret-key-12345");
+      expect(callArgs.options.env.ANTHROPIC_API_KEY).toBe("sk-ant-secret-key-12345");
     });
 
     it("redacts API key from error comments", async () => {
       process.env.ANTHROPIC_API_KEY = "sk-ant-leaked-key";
-      mockedExecSync.mockImplementation(() => {
-        throw new Error(
-          "Error: invalid key sk-ant-leaked-key at endpoint",
-        );
-      });
+      mockedQuery.mockReturnValue(
+        mockQueryError(["Error: invalid key sk-ant-leaked-key at endpoint"]),
+      );
 
       const octokit = makeOctokit();
       const context = makeContext("issues", { issue: { number: 1 } });
@@ -337,103 +376,97 @@ describe("invokeClaude", () => {
     });
   });
 
-  describe("passes prompt via stdin", () => {
-    it("passes prompt as input option, not in command string", async () => {
-      mockedExecSync.mockReturnValue("ok");
+  describe("uses bypassPermissions mode", () => {
+    it("sets permissionMode and allowDangerouslySkipPermissions", async () => {
+      mockedQuery.mockReturnValue(mockQuerySuccess("output"));
 
-      await invokeClaude('Say "hello" with $vars and `backticks`', {
+      await invokeClaude("prompt", {
         anthropicKey: "sk-ant-test",
       });
 
-      const callArgs = mockedExecSync.mock.calls[0];
-      const command = callArgs[0] as string;
-      const options = callArgs[1] as { input: string };
-
-      // Prompt must NOT appear in command string
-      expect(command).not.toContain("hello");
-      // Prompt must be passed via stdin input
-      expect(options.input).toBe('Say "hello" with $vars and `backticks`');
+      expect(mockedQuery).toHaveBeenCalledWith(
+        expect.objectContaining({
+          options: expect.objectContaining({
+            permissionMode: "bypassPermissions",
+            allowDangerouslySkipPermissions: true,
+          }),
+        }),
+      );
     });
   });
 });
 
-// ── runClaude (legacy convenience wrapper) ────────────
+// ── runClaude (convenience wrapper) ────────────
 
 describe("runClaude", () => {
-  it("returns trimmed output", () => {
-    mockedExecSync.mockReturnValue("  result  ");
-    const result = runClaude("prompt", { anthropicKey: "sk-ant-test" });
+  it("returns trimmed output", async () => {
+    mockedQuery.mockReturnValue(mockQuerySuccess("  result  "));
+    const result = await runClaude("prompt", { anthropicKey: "sk-ant-test" });
     expect(result).toBe("result");
   });
 
-  it("uses --print mode and passes prompt via stdin", () => {
-    mockedExecSync.mockReturnValue("ok");
-    runClaude("test prompt", { anthropicKey: "sk-ant-test" });
-    expect(mockedExecSync).toHaveBeenCalledWith(
-      "claude --print",
-      expect.objectContaining({ input: "test prompt" }),
+  it("uses read-only tools", async () => {
+    mockedQuery.mockReturnValue(mockQuerySuccess("ok"));
+    await runClaude("test prompt", { anthropicKey: "sk-ant-test" });
+    expect(mockedQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        prompt: "test prompt",
+        options: expect.objectContaining({
+          allowedTools: ["Read", "Glob", "Grep"],
+        }),
+      }),
     );
   });
 
-  it("throws on CLI failure", () => {
-    mockedExecSync.mockImplementation(() => {
-      throw new Error("CLI error");
-    });
-    expect(() =>
+  it("throws on SDK failure", async () => {
+    mockedQuery.mockReturnValue(mockQueryError(["SDK error"]));
+    await expect(
       runClaude("prompt", { anthropicKey: "sk-ant-test" }),
-    ).toThrow("CLI error");
+    ).rejects.toThrow("SDK error");
     expect(core.error).toHaveBeenCalled();
   });
 
-  it("passes API key via env", () => {
-    mockedExecSync.mockReturnValue("ok");
-    runClaude("prompt", { anthropicKey: "sk-ant-key" });
-    const options = mockedExecSync.mock.calls[0][1];
+  it("passes API key via env", async () => {
+    mockedQuery.mockReturnValue(mockQuerySuccess("ok"));
+    await runClaude("prompt", { anthropicKey: "sk-ant-key" });
+    const options = mockedQuery.mock.calls[0][0].options;
     expect(options.env.ANTHROPIC_API_KEY).toBe("sk-ant-key");
-  });
-
-  it("defaults to 30 minute timeout", () => {
-    mockedExecSync.mockReturnValue("ok");
-    runClaude("prompt", { anthropicKey: "sk-ant-test" });
-    expect(mockedExecSync).toHaveBeenCalledWith(
-      expect.any(String),
-      expect.objectContaining({ timeout: 30 * 60 * 1000 }),
-    );
   });
 });
 
-// ── runClaudeEdit (legacy convenience wrapper) ────────
+// ── runClaudeEdit (convenience wrapper) ────────
 
 describe("runClaudeEdit", () => {
-  it("returns trimmed output", () => {
-    mockedExecSync.mockReturnValue("  result  ");
-    const result = runClaudeEdit("prompt", { anthropicKey: "sk-ant-test" });
+  it("returns trimmed output", async () => {
+    mockedQuery.mockReturnValue(mockQuerySuccess("  result  "));
+    const result = await runClaudeEdit("prompt", { anthropicKey: "sk-ant-test" });
     expect(result).toBe("result");
   });
 
-  it("does NOT use --print mode and passes prompt via stdin", () => {
-    mockedExecSync.mockReturnValue("ok");
-    runClaudeEdit("edit prompt", { anthropicKey: "sk-ant-test" });
-    expect(mockedExecSync).toHaveBeenCalledWith(
-      "claude",
-      expect.objectContaining({ input: "edit prompt" }),
+  it("uses edit tools", async () => {
+    mockedQuery.mockReturnValue(mockQuerySuccess("ok"));
+    await runClaudeEdit("edit prompt", { anthropicKey: "sk-ant-test" });
+    expect(mockedQuery).toHaveBeenCalledWith(
+      expect.objectContaining({
+        options: expect.objectContaining({
+          allowedTools: ["Read", "Write", "Edit", "Bash", "Glob", "Grep"],
+        }),
+      }),
     );
   });
 
-  it("throws on CLI failure", () => {
-    mockedExecSync.mockImplementation(() => {
-      throw new Error("edit error");
-    });
-    expect(() =>
+  it("throws on SDK failure", async () => {
+    mockedQuery.mockReturnValue(mockQueryError(["edit error"]));
+    await expect(
       runClaudeEdit("prompt", { anthropicKey: "sk-ant-test" }),
-    ).toThrow("edit error");
+    ).rejects.toThrow("edit error");
     expect(core.error).toHaveBeenCalled();
   });
 
-  it("passes API key via env", () => {
-    mockedExecSync.mockReturnValue("ok");
-    runClaudeEdit("prompt", { anthropicKey: "sk-ant-key" });
-    const options = mockedExecSync.mock.calls[0][1];
+  it("passes API key via env", async () => {
+    mockedQuery.mockReturnValue(mockQuerySuccess("ok"));
+    await runClaudeEdit("prompt", { anthropicKey: "sk-ant-key" });
+    const options = mockedQuery.mock.calls[0][0].options;
     expect(options.env.ANTHROPIC_API_KEY).toBe("sk-ant-key");
   });
 });

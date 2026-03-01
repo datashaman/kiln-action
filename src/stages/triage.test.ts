@@ -82,14 +82,14 @@ describe("triage", () => {
   // ── AC: Triggers on issues.opened ─────────────────────
   describe("triggers on issues.opened", () => {
     it("processes an opened issue", async () => {
-      mockedRunClaude.mockReturnValue(VALID_RESPONSE);
+      mockedRunClaude.mockResolvedValue(VALID_RESPONSE);
       const ctx = makeCtx();
       const result = await triage(ctx);
       expect(result.status).toBe("success");
     });
 
     it("logs the issue number and title", async () => {
-      mockedRunClaude.mockReturnValue(VALID_RESPONSE);
+      mockedRunClaude.mockResolvedValue(VALID_RESPONSE);
       const ctx = makeCtx();
       await triage(ctx);
       expect(core.info).toHaveBeenCalledWith(
@@ -101,7 +101,7 @@ describe("triage", () => {
   // ── AC: Sends issue title and body to Claude ──────────
   describe("sends issue context to Claude", () => {
     it("passes issue title and body in the prompt", async () => {
-      mockedRunClaude.mockReturnValue(VALID_RESPONSE);
+      mockedRunClaude.mockResolvedValue(VALID_RESPONSE);
       const ctx = makeCtx();
       await triage(ctx);
 
@@ -111,7 +111,7 @@ describe("triage", () => {
     });
 
     it("passes issue number in the prompt", async () => {
-      mockedRunClaude.mockReturnValue(VALID_RESPONSE);
+      mockedRunClaude.mockResolvedValue(VALID_RESPONSE);
       const ctx = makeCtx();
       await triage(ctx);
 
@@ -120,7 +120,7 @@ describe("triage", () => {
     });
 
     it("handles empty issue body", async () => {
-      mockedRunClaude.mockReturnValue(VALID_RESPONSE);
+      mockedRunClaude.mockResolvedValue(VALID_RESPONSE);
       const ctx = makeCtx({
         context: makeContext({
           number: 2,
@@ -136,7 +136,7 @@ describe("triage", () => {
     });
 
     it("passes anthropic key and timeout to runClaude", async () => {
-      mockedRunClaude.mockReturnValue(VALID_RESPONSE);
+      mockedRunClaude.mockResolvedValue(VALID_RESPONSE);
       const ctx = makeCtx({ anthropicKey: "sk-ant-custom", timeoutMinutes: 15 });
       await triage(ctx);
 
@@ -150,7 +150,7 @@ describe("triage", () => {
   // ── AC: Claude responds with structured JSON ──────────
   describe("parses Claude JSON response", () => {
     it("parses JSON from code block", async () => {
-      mockedRunClaude.mockReturnValue(
+      mockedRunClaude.mockResolvedValue(
         '```json\n{"type":"bug","complexity":"s","clear_enough":true,"comment":"Got it.","labels":[]}\n```',
       );
       const ctx = makeCtx();
@@ -159,14 +159,14 @@ describe("triage", () => {
     });
 
     it("parses raw JSON without code block", async () => {
-      mockedRunClaude.mockReturnValue(VALID_RESPONSE);
+      mockedRunClaude.mockResolvedValue(VALID_RESPONSE);
       const ctx = makeCtx();
       const result = await triage(ctx);
       expect(result.status).toBe("success");
     });
 
     it("falls back to defaults on parse failure", async () => {
-      mockedRunClaude.mockReturnValue("This is not JSON at all");
+      mockedRunClaude.mockResolvedValue("This is not JSON at all");
       const ctx = makeCtx();
       const result = await triage(ctx);
 
@@ -179,7 +179,7 @@ describe("triage", () => {
     });
 
     it("logs raw output on parse failure", async () => {
-      mockedRunClaude.mockReturnValue("garbage output");
+      mockedRunClaude.mockResolvedValue("garbage output");
       const ctx = makeCtx();
       await triage(ctx);
 
@@ -192,7 +192,7 @@ describe("triage", () => {
   // ── AC: Applies type and size labels ──────────────────
   describe("applies labels", () => {
     it("applies type:{type} and size:{complexity} labels", async () => {
-      mockedRunClaude.mockReturnValue(VALID_RESPONSE);
+      mockedRunClaude.mockResolvedValue(VALID_RESPONSE);
       const ctx = makeCtx();
       await triage(ctx);
 
@@ -207,7 +207,7 @@ describe("triage", () => {
     });
 
     it("applies additional labels from Claude response", async () => {
-      mockedRunClaude.mockReturnValue(VALID_RESPONSE);
+      mockedRunClaude.mockResolvedValue(VALID_RESPONSE);
       const ctx = makeCtx();
       await triage(ctx);
 
@@ -219,7 +219,7 @@ describe("triage", () => {
     });
 
     it("handles missing labels array in response", async () => {
-      mockedRunClaude.mockReturnValue(
+      mockedRunClaude.mockResolvedValue(
         JSON.stringify({
           type: "bug",
           complexity: "xs",
@@ -242,7 +242,7 @@ describe("triage", () => {
   // ── AC: clear_enough=true → specifying ────────────────
   describe("clear_enough is true", () => {
     it("applies kiln:specifying label", async () => {
-      mockedRunClaude.mockReturnValue(VALID_RESPONSE);
+      mockedRunClaude.mockResolvedValue(VALID_RESPONSE);
       const ctx = makeCtx();
       await triage(ctx);
 
@@ -257,7 +257,7 @@ describe("triage", () => {
     });
 
     it("returns nextStage: specify", async () => {
-      mockedRunClaude.mockReturnValue(VALID_RESPONSE);
+      mockedRunClaude.mockResolvedValue(VALID_RESPONSE);
       const ctx = makeCtx();
       const result = await triage(ctx);
 
@@ -265,7 +265,7 @@ describe("triage", () => {
     });
 
     it("posts confirmation comment", async () => {
-      mockedRunClaude.mockReturnValue(VALID_RESPONSE);
+      mockedRunClaude.mockResolvedValue(VALID_RESPONSE);
       const ctx = makeCtx();
       await triage(ctx);
 
@@ -283,7 +283,7 @@ describe("triage", () => {
   // ── AC: clear_enough=false → needs-info ───────────────
   describe("clear_enough is false", () => {
     it("applies kiln:needs-info label with proper prefix", async () => {
-      mockedRunClaude.mockReturnValue(UNCLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(UNCLEAR_RESPONSE);
       const ctx = makeCtx();
       await triage(ctx);
 
@@ -296,7 +296,7 @@ describe("triage", () => {
     });
 
     it("uses custom prefix for needs-info label", async () => {
-      mockedRunClaude.mockReturnValue(UNCLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(UNCLEAR_RESPONSE);
       const ctx = makeCtx({ config: makeConfig("myapp") });
       await triage(ctx);
 
@@ -308,7 +308,7 @@ describe("triage", () => {
     });
 
     it("posts clarification comment from Claude", async () => {
-      mockedRunClaude.mockReturnValue(UNCLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(UNCLEAR_RESPONSE);
       const ctx = makeCtx();
       await triage(ctx);
 
@@ -322,7 +322,7 @@ describe("triage", () => {
     });
 
     it("does NOT apply kiln:specifying label", async () => {
-      mockedRunClaude.mockReturnValue(UNCLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(UNCLEAR_RESPONSE);
       const ctx = makeCtx();
       await triage(ctx);
 
@@ -330,7 +330,7 @@ describe("triage", () => {
     });
 
     it("returns nextStage: waiting-for-info", async () => {
-      mockedRunClaude.mockReturnValue(UNCLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(UNCLEAR_RESPONSE);
       const ctx = makeCtx();
       const result = await triage(ctx);
 
@@ -341,7 +341,7 @@ describe("triage", () => {
   // ── AC: Posts Kiln-branded comment ────────────────────
   describe("branded comment", () => {
     it("posts a Kiln-branded triage comment", async () => {
-      mockedRunClaude.mockReturnValue(VALID_RESPONSE);
+      mockedRunClaude.mockResolvedValue(VALID_RESPONSE);
       const ctx = makeCtx();
       await triage(ctx);
 
@@ -353,7 +353,7 @@ describe("triage", () => {
     });
 
     it("includes type and complexity in the comment", async () => {
-      mockedRunClaude.mockReturnValue(VALID_RESPONSE);
+      mockedRunClaude.mockResolvedValue(VALID_RESPONSE);
       const ctx = makeCtx();
       await triage(ctx);
 
@@ -374,7 +374,7 @@ describe("triage", () => {
   // ── Edge cases ────────────────────────────────────────
   describe("edge cases", () => {
     it("handles bug type correctly", async () => {
-      mockedRunClaude.mockReturnValue(
+      mockedRunClaude.mockResolvedValue(
         JSON.stringify({
           type: "bug",
           complexity: "xs",
@@ -394,7 +394,7 @@ describe("triage", () => {
     });
 
     it("handles improvement type correctly", async () => {
-      mockedRunClaude.mockReturnValue(
+      mockedRunClaude.mockResolvedValue(
         JSON.stringify({
           type: "improvement",
           complexity: "l",
@@ -414,7 +414,7 @@ describe("triage", () => {
     });
 
     it("handles chore type correctly", async () => {
-      mockedRunClaude.mockReturnValue(
+      mockedRunClaude.mockResolvedValue(
         JSON.stringify({
           type: "chore",
           complexity: "xl",
@@ -434,7 +434,7 @@ describe("triage", () => {
     });
 
     it("uses custom label prefix for specifying", async () => {
-      mockedRunClaude.mockReturnValue(VALID_RESPONSE);
+      mockedRunClaude.mockResolvedValue(VALID_RESPONSE);
       const ctx = makeCtx({ config: makeConfig("myapp") });
       await triage(ctx);
 

@@ -119,7 +119,7 @@ After creating the spec file, commit it to the current branch with message:
 
 Then push the branch.`;
 
-  runClaudeEdit(prompt, { anthropicKey, timeoutMinutes });
+  await runClaudeEdit(prompt, { anthropicKey, timeoutMinutes });
 
   const specPath = `specs/issue-${issueNum}.md`;
   if (!fs.existsSync(specPath)) {

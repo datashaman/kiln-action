@@ -100,14 +100,14 @@ describe("retriage", () => {
   // ── AC: Triggers on issue_comment.created ───────────
   describe("triggers on issue_comment.created", () => {
     it("processes a comment event", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx();
       const result = await retriage(ctx);
       expect(result.status).toBe("success");
     });
 
     it("logs the issue number and title", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx();
       await retriage(ctx);
       expect(core.info).toHaveBeenCalledWith(
@@ -120,7 +120,7 @@ describe("retriage", () => {
   // (This is handled by the router, but we verify the handler runs correctly)
   describe("handles issues with intake/needs-info labels", () => {
     it("runs for issue with kiln:needs-info label", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx();
       const result = await retriage(ctx);
       expect(result.status).toBe("success");
@@ -128,7 +128,7 @@ describe("retriage", () => {
     });
 
     it("runs for issue with kiln:intake label", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx({
         context: makeContext({
           issuePayload: {
@@ -196,7 +196,7 @@ describe("retriage", () => {
     });
 
     it("processes comments from regular users", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx({
         context: makeContext({
           commentPayload: {
@@ -215,7 +215,7 @@ describe("retriage", () => {
   // ── AC: Sends full issue body + all comments to Claude ────
   describe("sends full context to Claude", () => {
     it("includes issue title, body, and comments in the prompt", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx();
       await retriage(ctx);
 
@@ -229,7 +229,7 @@ describe("retriage", () => {
     });
 
     it("fetches comments from the GitHub API", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx();
       await retriage(ctx);
 
@@ -252,7 +252,7 @@ describe("retriage", () => {
           { user: { login: "author" }, body: "Using React" },
         ],
       });
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx({ octokit });
       await retriage(ctx);
 
@@ -265,7 +265,7 @@ describe("retriage", () => {
     });
 
     it("handles empty issue body", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx({
         context: makeContext({
           issuePayload: {
@@ -283,7 +283,7 @@ describe("retriage", () => {
     });
 
     it("passes anthropic key and timeout to runClaude", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx({
         anthropicKey: "sk-ant-custom",
         timeoutMinutes: 15,
@@ -297,7 +297,7 @@ describe("retriage", () => {
     });
 
     it("mentions re-triage context in the prompt", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx();
       await retriage(ctx);
 
@@ -309,7 +309,7 @@ describe("retriage", () => {
   // ── AC: If now clear → remove needs-info, apply specifying ──
   describe("clear_enough is true", () => {
     it("transitions from needs-info to specifying", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx();
       await retriage(ctx);
 
@@ -324,7 +324,7 @@ describe("retriage", () => {
     });
 
     it("returns nextStage: specify", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx();
       const result = await retriage(ctx);
 
@@ -332,7 +332,7 @@ describe("retriage", () => {
     });
 
     it("posts confirmation comment", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx();
       await retriage(ctx);
 
@@ -347,7 +347,7 @@ describe("retriage", () => {
     });
 
     it("uses custom label prefix", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx({ config: makeConfig("myapp") });
       await retriage(ctx);
 
@@ -365,7 +365,7 @@ describe("retriage", () => {
   // ── AC: If still unclear → keep needs-info, post follow-up ──
   describe("clear_enough is false", () => {
     it("does NOT transition labels", async () => {
-      mockedRunClaude.mockReturnValue(UNCLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(UNCLEAR_RESPONSE);
       const ctx = makeCtx();
       await retriage(ctx);
 
@@ -373,7 +373,7 @@ describe("retriage", () => {
     });
 
     it("returns nextStage: waiting-for-info", async () => {
-      mockedRunClaude.mockReturnValue(UNCLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(UNCLEAR_RESPONSE);
       const ctx = makeCtx();
       const result = await retriage(ctx);
 
@@ -381,7 +381,7 @@ describe("retriage", () => {
     });
 
     it("posts follow-up clarification request", async () => {
-      mockedRunClaude.mockReturnValue(UNCLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(UNCLEAR_RESPONSE);
       const ctx = makeCtx();
       await retriage(ctx);
 
@@ -396,7 +396,7 @@ describe("retriage", () => {
     });
 
     it("keeps kiln:needs-info label (no label changes)", async () => {
-      mockedRunClaude.mockReturnValue(UNCLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(UNCLEAR_RESPONSE);
       const ctx = makeCtx();
       await retriage(ctx);
 
@@ -410,7 +410,7 @@ describe("retriage", () => {
   // ── AC: Posts Kiln-branded comment ────────────────────
   describe("branded comment", () => {
     it("posts a Kiln-branded re-triage comment", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx();
       await retriage(ctx);
 
@@ -425,7 +425,7 @@ describe("retriage", () => {
   // ── JSON parsing ───────────────────────────────────────
   describe("parses Claude JSON response", () => {
     it("parses JSON from code block", async () => {
-      mockedRunClaude.mockReturnValue(
+      mockedRunClaude.mockResolvedValue(
         '```json\n{"type":"bug","complexity":"s","clear_enough":true,"comment":"Got it.","labels":[]}\n```',
       );
       const ctx = makeCtx();
@@ -435,14 +435,14 @@ describe("retriage", () => {
     });
 
     it("parses raw JSON without code block", async () => {
-      mockedRunClaude.mockReturnValue(CLEAR_RESPONSE);
+      mockedRunClaude.mockResolvedValue(CLEAR_RESPONSE);
       const ctx = makeCtx();
       const result = await retriage(ctx);
       expect(result.status).toBe("success");
     });
 
     it("falls back to defaults on parse failure", async () => {
-      mockedRunClaude.mockReturnValue("This is not JSON at all");
+      mockedRunClaude.mockResolvedValue("This is not JSON at all");
       const ctx = makeCtx();
       const result = await retriage(ctx);
 
@@ -455,7 +455,7 @@ describe("retriage", () => {
     });
 
     it("logs raw output on parse failure", async () => {
-      mockedRunClaude.mockReturnValue("garbage output");
+      mockedRunClaude.mockResolvedValue("garbage output");
       const ctx = makeCtx();
       await retriage(ctx);
 

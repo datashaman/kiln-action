@@ -84,7 +84,7 @@ Respond with a JSON block:
 
 Be thorough but fair. Only request changes for real issues, not style preferences.`;
 
-  const output = runClaude(prompt, { anthropicKey, timeoutMinutes });
+  const output = await runClaude(prompt, { anthropicKey, timeoutMinutes });
 
   let reviewResult: {
     verdict: string;

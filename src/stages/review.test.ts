@@ -135,7 +135,7 @@ const changesResponse = JSON.stringify({
 beforeEach(() => {
   jest.clearAllMocks();
   mockedExecSync.mockReturnValue("");
-  mockedRunClaude.mockReturnValue(`\`\`\`json\n${approveResponse}\n\`\`\``);
+  mockedRunClaude.mockResolvedValue(`\`\`\`json\n${approveResponse}\n\`\`\``);
   mockedExistsSync.mockReturnValue(true);
   mockedReadFileSync.mockReturnValue(
     "# Spec\n## Requirements\n- Must support OAuth2",
@@ -373,7 +373,7 @@ describe("review", () => {
   // ── AC6: If everything passes, Claude approves the PR ──
   describe("approves PR when no issues", () => {
     it("posts an APPROVE review when verdict is approve", async () => {
-      mockedRunClaude.mockReturnValue(
+      mockedRunClaude.mockResolvedValue(
         `\`\`\`json\n${approveResponse}\n\`\`\``,
       );
       const ctx = makeCtx();
@@ -388,7 +388,7 @@ describe("review", () => {
     });
 
     it("returns verdict approve in result", async () => {
-      mockedRunClaude.mockReturnValue(
+      mockedRunClaude.mockResolvedValue(
         `\`\`\`json\n${approveResponse}\n\`\`\``,
       );
       const ctx = makeCtx();
@@ -401,7 +401,7 @@ describe("review", () => {
   // ── AC7: If issues found, Claude requests changes with inline comments ──
   describe("requests changes when issues found", () => {
     it("posts a REQUEST_CHANGES review when verdict is request_changes", async () => {
-      mockedRunClaude.mockReturnValue(
+      mockedRunClaude.mockResolvedValue(
         `\`\`\`json\n${changesResponse}\n\`\`\``,
       );
       const ctx = makeCtx();
@@ -416,7 +416,7 @@ describe("review", () => {
     });
 
     it("includes inline comments for each issue", async () => {
-      mockedRunClaude.mockReturnValue(
+      mockedRunClaude.mockResolvedValue(
         `\`\`\`json\n${changesResponse}\n\`\`\``,
       );
       const ctx = makeCtx();
@@ -436,7 +436,7 @@ describe("review", () => {
     });
 
     it("includes severity in inline comment body", async () => {
-      mockedRunClaude.mockReturnValue(
+      mockedRunClaude.mockResolvedValue(
         `\`\`\`json\n${changesResponse}\n\`\`\``,
       );
       const ctx = makeCtx();
@@ -454,7 +454,7 @@ describe("review", () => {
     });
 
     it("returns verdict request_changes in result", async () => {
-      mockedRunClaude.mockReturnValue(
+      mockedRunClaude.mockResolvedValue(
         `\`\`\`json\n${changesResponse}\n\`\`\``,
       );
       const ctx = makeCtx();
@@ -464,7 +464,7 @@ describe("review", () => {
     });
 
     it("review body includes issue counts by severity", async () => {
-      mockedRunClaude.mockReturnValue(
+      mockedRunClaude.mockResolvedValue(
         `\`\`\`json\n${changesResponse}\n\`\`\``,
       );
       const ctx = makeCtx();
@@ -516,7 +516,7 @@ describe("review", () => {
   // ── Edge cases ──
   describe("edge cases", () => {
     it("falls back to raw JSON parsing when no code block", async () => {
-      mockedRunClaude.mockReturnValue(approveResponse);
+      mockedRunClaude.mockResolvedValue(approveResponse);
       const ctx = makeCtx();
       const result = await review(ctx);
 
@@ -525,7 +525,7 @@ describe("review", () => {
     });
 
     it("posts raw output as COMMENT when JSON parsing fails", async () => {
-      mockedRunClaude.mockReturnValue("This is not JSON at all.");
+      mockedRunClaude.mockResolvedValue("This is not JSON at all.");
       const ctx = makeCtx();
       const result = await review(ctx);
 
@@ -542,7 +542,7 @@ describe("review", () => {
     });
 
     it("falls back to summary review when inline comments fail", async () => {
-      mockedRunClaude.mockReturnValue(
+      mockedRunClaude.mockResolvedValue(
         `\`\`\`json\n${changesResponse}\n\`\`\``,
       );
       const octokit = makeOctokit();
@@ -564,7 +564,7 @@ describe("review", () => {
     });
 
     it("does not pass comments when there are no issues", async () => {
-      mockedRunClaude.mockReturnValue(
+      mockedRunClaude.mockResolvedValue(
         `\`\`\`json\n${approveResponse}\n\`\`\``,
       );
       const ctx = makeCtx();
