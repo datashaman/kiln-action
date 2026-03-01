@@ -1,0 +1,43 @@
+# .github/workflows/kiln.yml
+name: "🔥 Kiln"
+
+on:
+  # Triage: classify new issues
+  issues:
+    types: [opened, labeled]
+
+  # Re-triage: re-evaluate after author replies
+  issue_comment:
+    types: [created]
+
+  # Review: AI reviews new/updated implementation PRs
+  pull_request:
+    types: [opened, synchronize]
+
+  # Approve-spec, Fix, Ship: respond to PR review events
+  pull_request_review:
+    types: [submitted]
+
+  # Ship: auto-merge when CI passes
+  check_suite:
+    types: [completed]
+
+permissions:
+  issues: write
+  contents: write
+  pull-requests: write
+
+jobs:
+  kiln:
+    runs-on: ubuntu-latest
+    # Don't run on events triggered by Kiln itself
+    if: github.actor != 'github-actions[bot]'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      # Dogfood: use the action from this repo itself
+      - uses: ./
+        with:
+          anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
