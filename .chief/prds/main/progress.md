@@ -25,6 +25,8 @@
 - Specify stage: `runClaudeEdit` (edit mode) for AI spec generation; `transitionLabel` for specifying→spec-review transition
 - Specify stage uses `execSync` for git operations (config, checkout, commit, push) and `fs` for mkdir/existsSync/readFileSync
 - Approve-spec stage: extracts issue number from branch name `kiln/spec/issue-{number}` (fallback to PR body `Tracking issue: #N`), squash merges, transitions spec-review→implementing
+- Review stage: uses `runClaude` (read-only), fetches diff and file list via GitHub API, reads spec file from checkout, posts PR review via `pulls.createReview` with inline comments
+- Fix stage: uses `runClaudeEdit` for fixes + `runClaude` (read-only) for generating reply text per review comment; replies via `pulls.createReplyForReviewComment`
 
 ## 2026-03-01 - US-001
 - Converted project from JavaScript to TypeScript
@@ -196,4 +198,67 @@
   - `octokit.rest.pulls.merge` needs to be mocked separately from `issues` methods
   - Branch name regex `^kiln\/spec\/issue-(\d+)$` is strict — only matches the exact pattern from the specify stage
   - When testing stages that don't use Claude or fs/child_process, tests are simpler — only mock `@actions/core` and `../labels`
+---
+
+## 2026-03-01 - US-009
+- Verified existing `src/stages/implement.ts` implementation against all 12 acceptance criteria
+- Fixed PR title to match AC exactly: `🔨 Kiln Impl: {issue title}` (was `🔨 Kiln: {issue title}`)
+- Wrote 33 comprehensive tests in `src/stages/implement.test.ts` covering all AC
+- Tests cover: trigger, repo checkout, spec verification, branch creation, git config, Claude invocation, prompt content (spec path, issue ref, conventions, tests, lint, conventional commits, protected paths), push handling, PR creation (title, body with spec ref + Closes #N), PR labels, issue label transition, issue comment, edge cases
+- Files changed:
+  - src/stages/implement.ts (fixed PR title to match AC: "🔨 Kiln Impl:" prefix)
+  - src/stages/implement.test.ts (new — 33 tests)
+  - .chief/prds/main/prd.json (marked US-009 as passing)
+  - dist/index.js (rebuilt)
+- **Learnings for future iterations:**
+  - The implement stage mirrors the specify stage pattern closely: checkout repo → branch → invoke Claude edit → push → create PR → label PR → transition issue labels → comment on issue
+  - `implement.ts` was mostly pre-existing; only the PR title needed fixing to match the AC exactly
+  - The handler fetches main before branching (`git fetch origin main && git checkout main && git pull`) to ensure it has the merged spec
+  - Protected paths default to `.github/`, `.env`, `CLAUDE.md` but are configurable via `config.protected_paths`
+  - Push failure is handled gracefully with `core.warning` (Claude may have already pushed during edit mode)
+---
+
+## 2026-03-01 - US-010
+- Enhanced existing `src/stages/review.ts` handler to meet all 8 acceptance criteria
+- Added repo checkout with full history (`git fetch --unshallow || git fetch`) for AC3
+- Added spec file reading (`fs.existsSync` + `fs.readFileSync`) to include spec content in Claude prompt for AC4
+- Made `Closes #N` matching case-insensitive
+- Existing handler already covered: diff fetching via API, file listing, Claude prompt with 6 review areas, JSON parsing with fallback, PR review posting with inline comments, approve vs request_changes, Kiln branding
+- Wrote 34 comprehensive tests in `src/stages/review.test.ts` covering all 8 AC
+- Tests cover: trigger events, repo checkout (full history + branch), spec reading (extract issue number, read file, include in prompt, missing spec, no Closes #N), review areas (correctness, security, performance, error handling, test coverage, style), approve path, request_changes path (inline comments with severity), PR review posting (branded, summary), edge cases (raw JSON fallback, parse failure, inline comment failure, diff truncation, case-insensitive matching)
+- Files changed:
+  - src/stages/review.ts (added checkout, spec file reading, case-insensitive regex)
+  - src/stages/review.test.ts (new — 34 tests)
+  - .chief/prds/main/prd.json (marked US-010 as passing)
+  - dist/index.js (rebuilt)
+- **Learnings for future iterations:**
+  - The review stage was mostly pre-existing; needed checkout and spec content reading to meet AC3 and AC4
+  - Review handler uses `runClaude` (read-only/print mode) unlike implement/specify which use `runClaudeEdit`
+  - `git fetch --unshallow || git fetch` handles both shallow and full clones gracefully
+  - PR review API (`pulls.createReview`) supports inline comments via `comments` array with `path`, `line`, `body` fields
+  - When inline comments fail (e.g., file/line out of range), fallback to including issues in the review body as a list
+  - Mock Octokit methods with `as unknown as jest.Mock` pattern (not `as jest.Mock`) to bridge TypeScript type gaps
+---
+
+## 2026-03-01 - US-011
+- Enhanced existing `src/stages/fix.ts` to add AC7: reply to each review comment explaining changes made
+- Added `runClaude` (read-only) calls per review comment to generate specific reply text
+- Used `pulls.createReplyForReviewComment` API to post threaded replies on inline comments
+- Replies are Kiln-branded ("🔧 **Kiln** — {reply text}")
+- Reply failures are handled gracefully with `core.warning` (best-effort, doesn't block the fix stage)
+- Existing handler already covered AC1-AC6, AC8: checkout, fetch reviews/comments, Claude edit prompt, push, max iterations guard
+- Wrote 30 comprehensive tests in `src/stages/fix.test.ts` covering all 8 AC
+- Tests cover: trigger/logging, branch checkout, review fetching, prompt content, commit/push, reply to each comment (branded, Claude-generated, failure handling, no comments case, original_line fallback), completion comment, max iterations guard (limit, warning, label, increment, custom config, commit counting), edge cases
+- Files changed:
+  - src/stages/fix.ts (added AC7: reply to review comments using runClaude + createReplyForReviewComment)
+  - src/stages/fix.test.ts (new — 30 tests)
+  - .chief/prds/main/prd.json (marked US-011 as passing)
+  - dist/index.js (rebuilt)
+- **Learnings for future iterations:**
+  - The fix stage was mostly pre-existing; only AC7 (reply to review comments) was missing
+  - `pulls.createReplyForReviewComment` creates threaded replies on inline PR review comments — different from `issues.createComment`
+  - Use `runClaude` (read-only/print mode) for generating short reply text, with a short timeout (2 min) since replies are brief
+  - Reply generation uses a separate Claude call per comment — this could be expensive for many comments but keeps replies specific
+  - Review comments have both `line` and `original_line` — use `line || original_line` since `line` can be null for outdated diffs
+  - The fix stage mock pattern: mock `../claude` for both `runClaudeEdit` and `runClaude`, mock `child_process` with factory
 ---

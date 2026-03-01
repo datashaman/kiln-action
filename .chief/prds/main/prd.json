@@ -184,7 +184,8 @@
         "The push triggers a new synchronize event, which triggers re-review (Stage 5)"
       ],
       "priority": 11,
-      "passes": false
+      "passes": true,
+      "inProgress": false
     },
     {
       "id": "US-012",

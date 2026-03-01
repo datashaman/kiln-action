@@ -1,6 +1,6 @@
 import * as core from "@actions/core";
 import { execSync } from "child_process";
-import { runClaudeEdit } from "../claude";
+import { runClaudeEdit, runClaude } from "../claude";
 import { KilnContext, StageResult } from "../types";
 
 export default async function fix(ctx: KilnContext): Promise<StageResult> {
@@ -90,6 +90,31 @@ Then push to the current branch.`;
     execSync(`git push origin ${pr.head.ref}`);
   } catch {
     // Claude may have already pushed
+  }
+
+  // AC7: Reply to each review comment explaining the changes made
+  for (const comment of reviewComments) {
+    try {
+      const replyPrompt = `A code review comment was left on ${comment.path}:${comment.line || comment.original_line}:
+
+"${comment.body}"
+
+The fix agent has addressed this feedback. Write a brief, specific reply (1-3 sentences) explaining what was changed to address this comment. Be concrete about the fix, not vague. Do NOT use markdown code blocks. Just output the reply text directly.`;
+
+      const reply = runClaude(replyPrompt, { anthropicKey, timeoutMinutes: 2 });
+
+      await octokit.rest.pulls.createReplyForReviewComment({
+        ...context.repo,
+        pull_number: pr.number,
+        comment_id: comment.id,
+        body: `🔧 **Kiln** — ${reply}`,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      core.warning(
+        `Failed to reply to review comment ${comment.id}: ${message}`,
+      );
+    }
   }
 
   await octokit.rest.issues.createComment({
