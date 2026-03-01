@@ -16,6 +16,10 @@
 - Claude integration layer in `src/claude.ts` exports `invokeClaude` (async, returns `ClaudeResult`), `runClaude` (sync, read-only), `runClaudeEdit` (sync, edit mode)
 - `invokeClaude` accepts `ClaudeConfig` with optional octokit/context for error comment surfacing
 - Error comments are branded and API keys are redacted from any output
+- Triage stage: `runClaude` (read-only) for AI classification; `transitionLabel` from `labels.ts` for label transitions
+- Label prefix `{prefix}:needs-info` for needs-info label (not bare `needs-info`)
+- Labels.ts `LABEL_DEFS` includes `intake` and `needs-info` pipeline state labels
+- Stage test pattern: mock `@actions/core`, `../claude`, `../labels`; use `makeOctokit`/`makeConfig`/`makeContext`/`makeCtx` helpers
 
 ## 2026-03-01 - US-001
 - Converted project from JavaScript to TypeScript
@@ -111,4 +115,24 @@
   - Detect timeout via `error.killed` property on the error thrown by `execSync`
   - Use `escapeRegExp()` when building regex from user-controlled strings (API key) to avoid regex injection
   - `process.env.ANTHROPIC_API_KEY` in tests needs explicit cleanup in `beforeEach` to avoid test pollution
+---
+
+## 2026-03-01 - US-005
+- Completed triage stage handler with full AC compliance
+- Added `labels` field to Claude JSON response schema (AC3 requirement)
+- Fixed `needs-info` label to use proper prefix (`kiln:needs-info` instead of bare `needs-info`)
+- Exported `TriageResult` interface for typed triage response parsing
+- Added `intake` and `needs-info` label definitions to `src/labels.ts` (pipeline state labels referenced by router)
+- Added 27 comprehensive tests covering all AC: trigger, prompt content, JSON parsing, label application, clear/unclear paths, branded comments, edge cases
+- Files changed:
+  - src/stages/triage.ts (refactored: added `labels` field, exported `TriageResult`, fixed `needs-info` prefix)
+  - src/stages/triage.test.ts (new - 27 tests)
+  - src/labels.ts (added `intake` and `needs-info` label definitions)
+  - dist/index.js (rebuilt)
+- **Learnings for future iterations:**
+  - Stage tests should mock `../claude` and `../labels` modules, not `@actions/core` methods used in the module
+  - The triage prompt asks Claude for structured JSON; parsing uses code-block extraction then raw JSON fallback
+  - Default fallback on parse failure: `clear_enough: true`, moves to specification (safe default to not block pipeline)
+  - Labels from Claude response (`result.labels`) are spread into the labels array with `|| []` fallback for missing field
+  - `transitionLabel` is only called on the clear path (specifying); on unclear path, `addLabels` is used directly for `needs-info`
 ---

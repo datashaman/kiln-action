@@ -4,6 +4,16 @@ import { Octokit, KilnConfig } from "./types";
 
 const LABEL_DEFS = [
   {
+    suffix: "intake",
+    color: "c5def5",
+    description: "Kiln: issue received, awaiting triage",
+  },
+  {
+    suffix: "needs-info",
+    color: "fbca04",
+    description: "Kiln: waiting for clarification from author",
+  },
+  {
     suffix: "specifying",
     color: "c5def5",
     description: "Kiln: spec agent is writing the spec",

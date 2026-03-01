@@ -531,6 +531,16 @@ exports.transitionLabel = transitionLabel;
 const core = __importStar(__nccwpck_require__(7484));
 const LABEL_DEFS = [
     {
+        suffix: "intake",
+        color: "c5def5",
+        description: "Kiln: issue received, awaiting triage",
+    },
+    {
+        suffix: "needs-info",
+        color: "fbca04",
+        description: "Kiln: waiting for clarification from author",
+    },
+    {
         suffix: "specifying",
         color: "c5def5",
         description: "Kiln: spec agent is writing the spec",
@@ -1691,6 +1701,7 @@ Classify and assess:
 2. Complexity: xs, s, m, l, xl
 3. Is there enough information to write a technical spec? (clear_enough: true/false)
 4. Write a brief comment for the issue author.
+5. Suggest any additional labels (beyond type and size) that should be applied.
 
 If NOT clear enough, your comment should politely ask for the specific missing information.
 If clear enough, your comment should confirm your understanding of what needs to be done.
@@ -1701,7 +1712,8 @@ Respond with ONLY this JSON:
   "type": "feature",
   "complexity": "m",
   "clear_enough": true,
-  "comment": "Your comment here"
+  "comment": "Your comment here",
+  "labels": []
 }
 \`\`\``;
     const output = (0, claude_1.runClaude)(prompt, { anthropicKey, timeoutMinutes });
@@ -1721,27 +1733,36 @@ Respond with ONLY this JSON:
             complexity: "m",
             clear_enough: true,
             comment: "🔥 **Kiln** — Triaged. Moving to specification.",
+            labels: [],
         };
     }
+    // Post branded triage comment
     await octokit.rest.issues.createComment({
         ...context.repo,
         issue_number: issue.number,
         body: `🔥 **Kiln Triage**\n\n${result.comment}\n\n---\n*Type: \`${result.type}\` · Size: \`${result.complexity}\`*`,
     });
-    const labels = [`type:${result.type}`, `size:${result.complexity}`];
+    // Apply type and size labels, plus any additional labels from Claude
+    const labels = [
+        `type:${result.type}`,
+        `size:${result.complexity}`,
+        ...(result.labels || []),
+    ];
     await octokit.rest.issues.addLabels({
         ...context.repo,
         issue_number: issue.number,
         labels,
     });
     if (result.clear_enough) {
+        // Clear enough → move to specifying
         await (0, labels_1.transitionLabel)(octokit, context, issue.number, null, "specifying", prefix);
         return { status: "success", nextStage: "specify" };
     }
+    // Not clear enough → apply needs-info label with proper prefix
     await octokit.rest.issues.addLabels({
         ...context.repo,
         issue_number: issue.number,
-        labels: ["needs-info"],
+        labels: [`${prefix}:needs-info`],
     });
     return { status: "success", nextStage: "waiting-for-info" };
 }
