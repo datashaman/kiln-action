@@ -121,16 +121,22 @@ const EDIT_TOOLS = ["Read", "Write", "Edit", "Bash", "Glob", "Grep"];
 async function extractResult(prompt, anthropicKey, timeoutMs, allowEdits) {
     const abortController = new AbortController();
     const timer = setTimeout(() => abortController.abort(), timeoutMs);
+    const stderrChunks = [];
     try {
         let resultMessage;
         const stream = (0, claude_agent_sdk_1.query)({
             prompt,
             options: {
-                allowedTools: allowEdits ? EDIT_TOOLS : READ_ONLY_TOOLS,
+                tools: allowEdits ? EDIT_TOOLS : READ_ONLY_TOOLS,
                 permissionMode: "bypassPermissions",
                 allowDangerouslySkipPermissions: true,
+                persistSession: false,
                 abortController,
                 env: { ...process.env, ANTHROPIC_API_KEY: anthropicKey },
+                stderr: (data) => {
+                    stderrChunks.push(data);
+                    core.debug(`Claude SDK stderr: ${data}`);
+                },
             },
         });
         for await (const message of stream) {
@@ -139,11 +145,14 @@ async function extractResult(prompt, anthropicKey, timeoutMs, allowEdits) {
             }
         }
         if (!resultMessage) {
-            throw new Error("No result received from Claude Agent SDK");
+            const stderr = stderrChunks.join("");
+            throw new Error(`No result received from Claude Agent SDK${stderr ? `\nstderr: ${stderr}` : ""}`);
         }
         if (resultMessage.subtype !== "success") {
             const errorResult = resultMessage;
-            throw new Error(errorResult.errors?.join("; ") || `Claude SDK error: ${resultMessage.subtype}`);
+            const stderr = stderrChunks.join("");
+            const baseMsg = errorResult.errors?.join("; ") || `Claude SDK error: ${resultMessage.subtype}`;
+            throw new Error(`${baseMsg}${stderr ? `\nstderr: ${stderr}` : ""}`);
         }
         return resultMessage.result.trim();
     }
