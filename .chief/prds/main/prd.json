@@ -292,7 +292,8 @@
         "Provided in README and optionally as a standalone file (e.g. examples/CLAUDE.md)"
       ],
       "priority": 18,
-      "passes": false
+      "passes": true,
+      "inProgress": false
     }
   ]
 }

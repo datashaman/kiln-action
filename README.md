@@ -122,7 +122,9 @@ Create a `CLAUDE.md` file in your repo root to guide Kiln's AI agents. This file
 - If blocked or unsure, comment on the issue explaining why
 ```
 
-Customize the sections to match your project. The spec and implementation agents will follow these instructions.
+This is a starting point — customize every section to match your project. The spec and implementation agents will follow these instructions.
+
+A more detailed template with additional guidance is available at [`examples/CLAUDE.md`](examples/CLAUDE.md).
 
 ## Stages
 
