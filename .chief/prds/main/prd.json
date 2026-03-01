@@ -109,7 +109,8 @@
         "Comment posted on issue linking to the spec PR"
       ],
       "priority": 7,
-      "passes": false
+      "passes": true,
+      "inProgress": false
     },
     {
       "id": "US-008",
