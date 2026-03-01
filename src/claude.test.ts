@@ -78,8 +78,8 @@ describe("invokeClaude", () => {
       });
 
       expect(mockedExecSync).toHaveBeenCalledWith(
-        'claude --print "Review this code"',
-        expect.any(Object),
+        "claude --print",
+        expect.objectContaining({ input: "Review this code" }),
       );
     });
 
@@ -92,8 +92,8 @@ describe("invokeClaude", () => {
       });
 
       expect(mockedExecSync).toHaveBeenCalledWith(
-        'claude "Fix this bug"',
-        expect.any(Object),
+        "claude",
+        expect.objectContaining({ input: "Fix this bug" }),
       );
     });
   });
@@ -337,40 +337,22 @@ describe("invokeClaude", () => {
     });
   });
 
-  describe("prompt escaping", () => {
-    it("escapes double quotes in prompts", async () => {
+  describe("passes prompt via stdin", () => {
+    it("passes prompt as input option, not in command string", async () => {
       mockedExecSync.mockReturnValue("ok");
 
-      await invokeClaude('Say "hello"', { anthropicKey: "sk-ant-test" });
-
-      expect(mockedExecSync).toHaveBeenCalledWith(
-        expect.stringContaining('\\"hello\\"'),
-        expect.any(Object),
-      );
-    });
-
-    it("escapes dollar signs in prompts", async () => {
-      mockedExecSync.mockReturnValue("ok");
-
-      await invokeClaude("Cost is $100", { anthropicKey: "sk-ant-test" });
-
-      expect(mockedExecSync).toHaveBeenCalledWith(
-        expect.stringContaining("\\$100"),
-        expect.any(Object),
-      );
-    });
-
-    it("escapes backticks in prompts", async () => {
-      mockedExecSync.mockReturnValue("ok");
-
-      await invokeClaude("Use `git status`", {
+      await invokeClaude('Say "hello" with $vars and `backticks`', {
         anthropicKey: "sk-ant-test",
       });
 
-      expect(mockedExecSync).toHaveBeenCalledWith(
-        expect.stringContaining("\\`git status\\`"),
-        expect.any(Object),
-      );
+      const callArgs = mockedExecSync.mock.calls[0];
+      const command = callArgs[0] as string;
+      const options = callArgs[1] as { input: string };
+
+      // Prompt must NOT appear in command string
+      expect(command).not.toContain("hello");
+      // Prompt must be passed via stdin input
+      expect(options.input).toBe('Say "hello" with $vars and `backticks`');
     });
   });
 });
@@ -384,12 +366,12 @@ describe("runClaude", () => {
     expect(result).toBe("result");
   });
 
-  it("uses --print mode", () => {
+  it("uses --print mode and passes prompt via stdin", () => {
     mockedExecSync.mockReturnValue("ok");
-    runClaude("prompt", { anthropicKey: "sk-ant-test" });
+    runClaude("test prompt", { anthropicKey: "sk-ant-test" });
     expect(mockedExecSync).toHaveBeenCalledWith(
-      expect.stringContaining("--print"),
-      expect.any(Object),
+      "claude --print",
+      expect.objectContaining({ input: "test prompt" }),
     );
   });
 
@@ -429,11 +411,13 @@ describe("runClaudeEdit", () => {
     expect(result).toBe("result");
   });
 
-  it("does NOT use --print mode (edit mode)", () => {
+  it("does NOT use --print mode and passes prompt via stdin", () => {
     mockedExecSync.mockReturnValue("ok");
-    runClaudeEdit("prompt", { anthropicKey: "sk-ant-test" });
-    const command = mockedExecSync.mock.calls[0][0];
-    expect(command).not.toContain("--print");
+    runClaudeEdit("edit prompt", { anthropicKey: "sk-ant-test" });
+    expect(mockedExecSync).toHaveBeenCalledWith(
+      "claude",
+      expect.objectContaining({ input: "edit prompt" }),
+    );
   });
 
   it("throws on CLI failure", () => {

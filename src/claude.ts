@@ -54,15 +54,14 @@ export async function invokeClaude(
   } = config;
 
   const timeoutMs = timeoutMinutes * 60 * 1000;
-  const escapedPrompt = escapeShell(prompt);
 
   // --print mode = read-only (no file edits); omit for edit mode
-  const command = allowEdits
-    ? `claude "${escapedPrompt}"`
-    : `claude --print "${escapedPrompt}"`;
+  const command = allowEdits ? "claude" : "claude --print";
 
   try {
+    // Pass prompt via stdin to avoid shell escaping issues with complex input
     const output = execSync(command, {
+      input: prompt,
       env: {
         ...process.env,
         ANTHROPIC_API_KEY: anthropicKey,
@@ -103,7 +102,8 @@ export function runClaude(
   const timeoutMs = timeoutMinutes * 60 * 1000;
 
   try {
-    const output = execSync(`claude --print "${escapeShell(prompt)}"`, {
+    const output = execSync("claude --print", {
+      input: prompt,
       env: { ...process.env, ANTHROPIC_API_KEY: anthropicKey },
       timeout: timeoutMs,
       maxBuffer: MAX_BUFFER_BYTES,
@@ -129,7 +129,8 @@ export function runClaudeEdit(
   const timeoutMs = timeoutMinutes * 60 * 1000;
 
   try {
-    const output = execSync(`claude "${escapeShell(prompt)}"`, {
+    const output = execSync("claude", {
+      input: prompt,
       env: { ...process.env, ANTHROPIC_API_KEY: anthropicKey },
       timeout: timeoutMs,
       maxBuffer: MAX_BUFFER_BYTES,
@@ -199,10 +200,6 @@ function resolveCommentTarget(context: Context): number | undefined {
 function sanitizeOutput(text: string, apiKey?: string): string {
   if (!apiKey) return text;
   return text.replace(new RegExp(escapeRegExp(apiKey), "g"), "[REDACTED]");
-}
-
-function escapeShell(str: string): string {
-  return str.replace(/"/g, '\\"').replace(/\$/g, "\\$").replace(/`/g, "\\`");
 }
 
 function escapeRegExp(str: string): string {
