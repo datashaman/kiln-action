@@ -263,7 +263,8 @@
         "Troubleshooting section covers common issues (missing labels, missing secret, permissions)"
       ],
       "priority": 16,
-      "passes": false
+      "passes": false,
+      "inProgress": true
     },
     {
       "id": "US-017",
